@@ -1,1 +1,0 @@
-/Users/asmisha/.nvm/versions/node/v24.10.0/lib/node_modules/@mariozechner/pi-coding-agent/examples/extensions/subagent/prompts/implement-and-review.md
