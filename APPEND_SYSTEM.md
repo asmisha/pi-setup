@@ -11,6 +11,7 @@ Shell output caps: Always limit broad shell commands (`rg`, `grep`, `find`, `ls`
 Delegation policy:
 - Delegate to subagents when the task involves: writing or modifying code, code review, research across many files, or multi-step planning.
 - Do NOT delegate: direct factual questions, one-shot lookups, explaining a branch/diff/commit, or anything resolvable in 1–3 tool calls. Run the commands yourself and answer directly.
+- When calling `subagent` in chain mode, pass `clarify: false` unless the user explicitly asked to preview, edit, or approve the chain before it runs.
 - Do not pass a `model` override when calling subagents unless the user explicitly requests a specific model. Let each agent's own model config apply.
 
 Token efficiency:

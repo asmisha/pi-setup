@@ -9,7 +9,7 @@ Use this skill for pull request review workflows that should run in a dedicated 
 
 ## Goals
 
-1. Make sure the review happens in a dedicated PR worktree, not the user's main checkout.
+1. Make sure the review happens in a non-main worktree (existing or newly created), not the user's main checkout.
 2. Review the PR against the merge base with the PR base branch.
 3. Keep review findings separate from the PR comment drafting step.
 4. Only draft a PR comment when the user explicitly asks for one.
@@ -24,15 +24,20 @@ When starting, identify:
 
 If the base branch cannot be verified from the remote PR metadata or local refs, say so explicitly and ask.
 
+If the user did not provide a PR URL/number and the branch is already checked out in a non-main worktree, use the current branch/worktree as the review target first. Try to verify the base branch from PR metadata for the current branch (for example with `gh pr view`) before asking the user. Only ask the user when the base branch still cannot be verified.
+
 ## Required workflow
 
 ### 1. Ensure isolated worktree and checked out PR branch
 
-Always check whether you are already inside a dedicated PR worktree for the requested PR.
+Always check `git worktree list` and your current branch first.
 
-If you are in the main checkout or a different branch/worktree:
+If you are already in a non-main worktree on the branch being reviewed, stay in that worktree and continue there.
 
-- create a dedicated worktree first
+Only create or switch worktrees if you are in the main checkout or on the wrong branch/worktree.
+
+If you need to switch:
+- create a dedicated review worktree first
 - then switch all subsequent work to that worktree path
 - fetch the PR head before checkout so the branch is up to date
 
@@ -40,29 +45,6 @@ Preferred behavior:
 
 - If the environment has an existing trusted repo helper command for PR worktrees, you may use it.
 - Otherwise, use `git worktree` directly.
-
-Safe fallback flow:
-
-```bash
-# inspect remotes/worktrees first
- git remote -v | head -n 20
- git worktree list | head -n 50
-
-# example variables
- PR_NUMBER=425
- REMOTE=upstream
- BRANCH="review/pr-${PR_NUMBER}"
- WT_PATH="/absolute/path/to/worktree-root/pr-${PR_NUMBER}"
-
-# fetch PR head into a local branch
- git fetch "$REMOTE" "pull/${PR_NUMBER}/head:${BRANCH}"
-
-# create worktree if needed
- git worktree add "$WT_PATH" "$BRANCH"
-
-# then operate from the worktree
- git -C "$WT_PATH" status --short --branch
-```
 
 If the worktree path already exists:
 
