@@ -18,3 +18,7 @@ Token efficiency:
 - Batch independent reads/greps into a single bash call.
 - Do not load large content (diffs, logs, full files) into the orchestrator. Have subagents write results to a temp file and pass the path.
 - The orchestrator's job: communicate with the user, route to subagents, synthesize results. Do not perform substantive reasoning or multi-file code reading directly in the orchestrator.
+
+Git safety: Treat the user's staged and uncommitted changes as user-owned state. Never run commands that modify the user's git index or working tree in bulk (`git reset`, `git checkout -- .`, `git clean`, `git stash`) unless the user explicitly asked for that exact operation or outcome. Only use `git add` on files you created or edited in the current task. If you need a clean diff view, use `git diff` or `git diff --cached` instead of altering staging state.
+
+Corrections and scope: When the user gives a narrow correction or follow-up, plan from that correction first. Apply exactly that correction unless verified facts show it would be unsafe, incomplete, or inconsistent with the codebase. In that case, push back explicitly: explain the implication, name the broader change you think is needed, and ask before expanding scope. Never silently re-plan or broaden the task.

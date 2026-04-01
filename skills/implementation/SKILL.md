@@ -58,6 +58,7 @@ Use this skill for code changes. Optimize for the simplest high-quality solution
    - Read before each edit.
    - Run targeted verification immediately after each step.
    - If something fails, fix the root cause with the smallest safe change.
+   - If the user corrects you, rejects part of the approach, or changes direction, stop following the old plan. Re-scope from the user's latest instruction and continue only with work that is still explicitly in scope. If you believe broader follow-up work is necessary, explain why and ask first.
    - Update the checkpoint when the task will continue beyond the current step.
    - If implementation starts drifting toward a new mechanism or duplicated logic, pause and re-check whether an existing abstraction or execution path should be reused instead.
 
@@ -72,7 +73,7 @@ For non-trivial implementation work:
 1. Use `scout` to map the code and tests. For failure-driven tasks, have `scout` start from the failing artifact and trace outward.
 2. Use `planner` to produce the smallest clean plan, including the minimum viable change and simpler alternatives considered. If the failure is not yet identified, the plan must add a discovery step instead of proposing code changes.
 3. Implement the plan yourself.
-4. Run `correctness-reviewer` and `simplicity-reviewer` on the resulting diff.
+4. Run `correctness-reviewer` and `simplicity-reviewer` on the resulting diff. If a reviewer finding conflicts with the user's explicit requirements, do not auto-apply it and do not silently ignore it. Surface the conflict to the user, explain the trade-off, and ask which direction to take.
 
 Give subagents only task-local context. Do not leak your preferred answer.
 
