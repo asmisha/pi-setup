@@ -4,7 +4,7 @@ description: Bounded Sentry issue/event investigation with strict stop condition
 tools: mcp, read, bash
 model: openai-codex/gpt-5.4
 thinking: minimal
-output: final
+output: false
 defaultProgress: true
 ---
 
