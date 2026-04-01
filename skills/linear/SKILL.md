@@ -10,7 +10,7 @@ This Pi setup accesses Linear through the single `mcp` proxy tool, backed by `mc
 ## Important Context Rules
 
 - Do **not** expect first-class `linear_*` tools in Pi's normal tool list by default.
-- Use the single `mcp` tool to discover and call Linear tools only when needed.
+- If the user provides a Linear URL/ID or asks about Linear issue/document state, query Linear via the `mcp` tool before answering. Do not answer from the URL slug, repo state, or guesswork alone.
 - Keep context small:
   1. search tools first,
   2. describe the selected tool if needed,
