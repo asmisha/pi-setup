@@ -12,6 +12,7 @@ Use this skill for code changes. Optimize for the simplest high-quality solution
 1. **Stabilize the target**
    - Restate the goal, constraints, and success criteria.
    - Read project instructions and discover relevant code, tests, configs, migrations, and callers before editing.
+   - For failure-driven tasks (bug, regression, failing test, CI, production issue), first identify the observed failure from a concrete artifact such as a failing test, log, stack trace, or CI step before choosing a fix.
    - If the task is ambiguous, resolve that ambiguity before coding.
    - Identify the architectural boundary that should own the fix: UI/render path, request/action path, domain/service layer, worker/background job, persistence layer, or script.
    - Search for existing helpers, utilities, flows, hooks, schemas, and services that already solve part of the problem before designing a new mechanism.
@@ -19,9 +20,10 @@ Use this skill for code changes. Optimize for the simplest high-quality solution
 2. **Frame and challenge the solution**
    - Explicitly identify:
      - what problem is being solved
+     - what evidence shows this is the problem instead of a nearby latent issue
      - why it needs to be solved now
      - whether all requested work is actually needed to solve it
-     - the minimum change that would solve it
+     - the minimum change that would solve the verified problem
      - at least one simpler alternative
      - whether the proposed change belongs in the current execution boundary
      - whether the change duplicates existing functionality or introduces a new path that existing code could cover
@@ -67,8 +69,8 @@ Use this skill for code changes. Optimize for the simplest high-quality solution
 ## Recommended subagent pattern
 
 For non-trivial implementation work:
-1. Use `scout` to map the code and tests.
-2. Use `planner` to produce the smallest clean plan, including the minimum viable change and simpler alternatives considered.
+1. Use `scout` to map the code and tests. For failure-driven tasks, have `scout` start from the failing artifact and trace outward.
+2. Use `planner` to produce the smallest clean plan, including the minimum viable change and simpler alternatives considered. If the failure is not yet identified, the plan must add a discovery step instead of proposing code changes.
 3. Implement the plan yourself.
 4. Run `correctness-reviewer` and `simplicity-reviewer` on the resulting diff.
 
