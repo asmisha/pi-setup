@@ -1,6 +1,6 @@
 ---
 name: pr-double-review
-description: Run a two-pass pull request review in an isolated worktree: a normal first review cycle, then a grounded second-pass review brief, then a second focused review cycle to find deeper or cross-cutting issues.
+description: "Run a two-pass pull request review in an isolated worktree: a normal first review cycle, then a grounded second-pass review brief, then a second focused review cycle to find deeper or cross-cutting issues."
 ---
 
 # PR Double Review
