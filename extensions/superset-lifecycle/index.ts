@@ -24,6 +24,11 @@ function isSupersetTerminal() {
 	return Boolean(superset.paneId || superset.tabId || superset.workspaceId);
 }
 
+function isSubagentProcess() {
+	const depth = Number(process.env.PI_SUBAGENT_DEPTH ?? "0");
+	return Number.isFinite(depth) && depth > 0;
+}
+
 async function sendSupersetHook(eventType: HookEvent): Promise<void> {
 	const superset = getSupersetEnv();
 	if (!isSupersetTerminal()) return;
@@ -69,7 +74,7 @@ async function sendSupersetHook(eventType: HookEvent): Promise<void> {
 }
 
 export default function supersetLifecycle(pi: ExtensionAPI) {
-	if (process.argv.includes("--no-session")) {
+	if (process.argv.includes("--no-session") || isSubagentProcess()) {
 		return;
 	}
 
@@ -105,34 +110,4 @@ export default function supersetLifecycle(pi: ExtensionAPI) {
 		}
 	});
 
-	pi.registerCommand("superset-hook-test", {
-		description: "Send a test Start/Stop lifecycle hook to Superset",
-		handler: async (_args, ctx) => {
-			if (!isSupersetTerminal()) {
-				ctx.ui.notify(
-					"Not running inside a Superset terminal; no hook sent.",
-					"warning",
-				);
-				return;
-			}
-
-			const { port, paneId, tabId, workspaceId } = getSupersetEnv();
-			if (!port) {
-				ctx.ui.notify(
-					"SUPERSET_PORT is missing; cannot send lifecycle hook.",
-					"error",
-				);
-				return;
-			}
-
-			await sendSupersetHook("Start");
-			await new Promise((resolve) => setTimeout(resolve, 250));
-			await sendSupersetHook("Stop");
-
-			ctx.ui.notify(
-				`Sent Superset lifecycle test (${workspaceId ?? "no workspace"} · ${tabId ?? "no tab"} · ${paneId ?? "no pane"})`,
-				"info",
-			);
-		},
-	});
 }
