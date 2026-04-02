@@ -10,17 +10,13 @@
  * The status bar shows the branch and PR info (if applicable).
  *
  * To make tools work in the new directory, the extension:
- * - Overrides bash with a spawnHook that uses process.cwd() at call time
- * - Overrides read/write/edit to resolve relative paths against process.cwd()
+ * - Registers path-sensitive find/grep/ls wrappers that resolve relative paths against process.cwd()
+ * - Relies on the user's global worktree extension for bash/read/write/edit cwd handling
  * - Patches the system prompt to tell the LLM the correct cwd
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import {
-	createBashTool,
-	createReadTool,
-	createWriteTool,
-	createEditTool,
 	createFindTool,
 	createGrepTool,
 	createLsTool,
@@ -29,7 +25,7 @@ import {
 import { Container, type SelectItem, SelectList, Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { execSync, spawn as nodeSpawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { resolve, basename, isAbsolute } from "node:path";
+import { resolve, basename } from "node:path";
 
 type PrChecksStatus = "passing" | "failing" | "pending" | null;
 type PrReviewDecision = "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
@@ -952,53 +948,15 @@ export default function (pi: ExtensionAPI) {
 	stopPrMetadataRefresh();
 
 	// ── Tool overrides ────────────────────────────────────────────────
-
-	const bashOverride = createBashTool(originalCwd, {
-		spawnHook: ({ command, cwd: _capturedCwd, env }) => ({
-			command,
-			cwd: process.cwd(),
-			env,
-		}),
-	});
-	pi.registerTool({
-		name: "bash",
-		description: bashOverride.description,
-		parameters: bashOverride.parameters,
-		execute: (id, params, signal, onUpdate, ctx) =>
-			bashOverride.execute(id, params, signal, onUpdate),
-	});
+	// bash/read/write/edit are already overridden by the user's global worktree
+	// extension at ~/.pi/agent/extensions/worktree.ts. Re-registering them here
+	// causes extension tool conflicts. Keep only the extra path-sensitive tools
+	// that the global extension does not provide.
 
 	function resolvePath(path: string): string {
-		if (!path || isAbsolute(path) || path.startsWith("~")) return path;
+		if (!path || path.startsWith("/") || path.startsWith("~")) return path;
 		return resolve(process.cwd(), path);
 	}
-
-	const readBuiltin = createReadTool(originalCwd);
-	pi.registerTool({
-		name: "read",
-		description: readBuiltin.description,
-		parameters: readBuiltin.parameters,
-		execute: (id, params, signal, onUpdate, ctx) =>
-			readBuiltin.execute(id, { ...params, path: resolvePath(params.path) }, signal, onUpdate),
-	});
-
-	const writeBuiltin = createWriteTool(originalCwd);
-	pi.registerTool({
-		name: "write",
-		description: writeBuiltin.description,
-		parameters: writeBuiltin.parameters,
-		execute: (id, params, signal, onUpdate, ctx) =>
-			writeBuiltin.execute(id, { ...params, path: resolvePath(params.path) }, signal, onUpdate),
-	});
-
-	const editBuiltin = createEditTool(originalCwd);
-	pi.registerTool({
-		name: "edit",
-		description: editBuiltin.description,
-		parameters: editBuiltin.parameters,
-		execute: (id, params, signal, onUpdate, ctx) =>
-			editBuiltin.execute(id, { ...params, path: resolvePath(params.path) }, signal, onUpdate),
-	});
 
 	const findBuiltin = createFindTool(originalCwd);
 	pi.registerTool({
