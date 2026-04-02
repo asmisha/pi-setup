@@ -69,6 +69,10 @@ async function sendSupersetHook(eventType: HookEvent): Promise<void> {
 }
 
 export default function supersetLifecycle(pi: ExtensionAPI) {
+	if (process.argv.includes("--no-session")) {
+		return;
+	}
+
 	let activeAgents = 0;
 
 	const start = async () => {
@@ -94,8 +98,11 @@ export default function supersetLifecycle(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", async () => {
+		const wasActive = activeAgents > 0;
 		activeAgents = 0;
-		await sendSupersetHook("Stop");
+		if (wasActive) {
+			await sendSupersetHook("Stop");
+		}
 	});
 
 	pi.registerCommand("superset-hook-test", {
