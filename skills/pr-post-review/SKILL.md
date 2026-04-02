@@ -35,7 +35,7 @@ When starting, identify:
   - explicit-only: create and submit a comment review immediately
   - explicit-only: approve with comments
 - whether GitHub write access is available
-- whether unmappable findings should be skipped or returned for user review
+- whether unmappable findings should go in the review body (default) or be skipped
 
 If the findings are missing, fuzzy, or still under discussion, stop. This skill is for submitting verified findings, not discovering new ones.
 
@@ -83,7 +83,7 @@ Prefer current `line` / `side` fields over deprecated `position`.
 
 Only submit inline comments when you can verify that the target line exists in the current PR diff chunk.
 
-If a finding cannot be mapped unambiguously, do not guess. Ask the user whether to skip it or keep it out of the submitted review.
+If a finding cannot be mapped to a specific diff line, include it in the review body text instead of as an inline comment, and name the concrete file paths and/or function names that support it. Do not silently drop unmappable findings.
 
 ### 4. Draft or validate the review text
 
@@ -109,6 +109,7 @@ Review body rules:
 - the first line must be exactly: `Misha's terminal here`
 - keep the body short and high-signal
 - mention only the already-verified findings being submitted
+- for findings included in the body because they are not inlineable, cite the concrete file paths and/or function names so a reviewer can find them quickly
 - the last line may be a short joke grounded in the actual findings and generated via `humor` when that matches the user's style
 
 Inline comment rules:
@@ -128,7 +129,7 @@ Show the user:
 - the final review body
 - each inline comment with `path` + `line` when applicable
 - the total comment count
-- any findings skipped because they could not be mapped
+- any findings included in the body because they could not be mapped to a diff line
 
 Ask for explicit confirmation before any GitHub write.
 
