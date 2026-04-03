@@ -1,0 +1,13 @@
+{
+  "name": "playwright-browser",
+  "private": true,
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "dependencies": {
+    "playwright": "^1.59.1"
+  }
+}
