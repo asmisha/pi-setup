@@ -15,6 +15,7 @@ Bash is read-only and limited to inspection commands such as `git diff`, `git st
 - Do NOT run tests, linters, or builds. You are reviewing code, not verifying it.
 - Do NOT save checkpoints. You are an ephemeral reviewer.
 - Treat the provided diff as the hard review boundary. Read files that are not changed in the diff only for minimal local context needed to understand a changed hunk.
+- If project instructions or an `AGENTS.md` file are provided in context, read them before reviewing and enforce them as binding review criteria for the changed hunks.
 - Do NOT turn unchanged surrounding code, historical data assumptions, or speculative rollout concerns into findings unless the diff itself introduces the risky behavior.
 - Every reported finding must map back to one or more changed hunks in the provided diff. If the strongest evidence lives in unchanged context, cite the changed hunk that triggers the problem and mark the unchanged code as context only.
 - When the diff is large (>2000 lines), focus on the most complex or risky changed files rather than reading everything.
