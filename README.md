@@ -1,36 +1,48 @@
 # pi-config
 
-## Pi theme: `superset-light-contrast`
+Personal Pi configuration and support files.
 
-This repo includes the current local high-contrast Pi light theme so the same color scheme can be used on another machine.
+## What is in this repo
 
-Theme file:
+Verified top-level contents:
 
-- `themes/superset-light-contrast.json`
+- `extensions/` - Pi extensions that add workflow behavior
+- `agents/` - custom agent definitions in Markdown
+- `skills/` - custom skills and reference material
+- `prompts/` - reusable prompt templates
+- `themes/` - Pi theme files
+- `scripts/` - small workflow scripts
+- `APPEND_SYSTEM.md` - extra system-level guidance appended to prompts
+- `AGENTS.md` - project instructions for agents working in this repo
 
-### Use it from this repo
+## Extensions
 
-Pi can load this theme file directly from the repo, or you can copy it into your global Pi themes directory.
+### `extensions/superset-lifecycle/`
+Sends lightweight lifecycle hooks for Pi activity to a local Superset listener. It detects Superset-related environment variables, emits `Start` and `Stop` events around agent activity, and skips subagent and `--no-session` runs.
 
-1. Open Pi with this repo available.
-2. Select the theme in `/settings`.
-3. Choose `superset-light-contrast`.
+See `extensions/superset-lifecycle/README.md`.
 
-### Make it your default on another machine
+### `extensions/workflow-foundation/`
+Adds a shared evidence-first instruction block to agent system prompts and registers the `task_checkpoint` tool for saving and restoring concise task checkpoints by repo and branch.
 
-If you want this theme globally, copy it into your Pi themes directory and set it in settings:
+See `extensions/workflow-foundation/README.md`.
 
-```bash
-mkdir -p ~/.pi/agent/themes
-cp themes/superset-light-contrast.json ~/.pi/agent/themes/
-```
+### `extensions/worktree.ts`
+Adds worktree-aware Pi commands and path-sensitive tool wrappers so a session can switch into another git worktree and keep using Pi against the new working directory.
 
-Then set this in `~/.pi/agent/settings.json`:
+See `extensions/worktree.md`.
 
-```json
-{
-  "theme": "superset-light-contrast"
-}
-```
+## Other notable files
 
-You can also keep using the project-local copy and just select it by name in `/settings` while working in this repo.
+### `themes/superset-light-contrast.json`
+A light, higher-contrast Pi theme named `superset-light-contrast`.
+
+### `prompts/pr-ready.md`
+A prompt template for moving the current PR out of draft and requesting review from recent contributors, using `scripts/select-pr-reviewers.sh` as the source of truth.
+
+### `scripts/select-pr-reviewers.sh`
+A shell script that inspects the current PR with `gh`, ranks recent contributors for changed files, filters out unsuitable reviewers, and prints tab-separated results.
+
+## Scope note
+
+This repo contains configuration, extensions, prompts, and workflow helpers. It does **not** currently document a build, packaging, or installation flow in the checked-in files verified for this rewrite.
