@@ -58,7 +58,7 @@ Use this skill for code changes. Optimize for the simplest high-quality solution
    - Read before each edit.
    - Run targeted verification immediately after each step.
    - If something fails, fix the root cause with the smallest safe change.
-   - If the user corrects you, rejects part of the approach, or changes direction, stop following the old plan. Re-scope from the user's latest instruction and continue only with work that is still explicitly in scope. If you believe broader follow-up work is necessary, explain why and ask first.
+   - If the user corrects you, rejects part of the approach, or changes direction, stop following the old plan. Re-scope from the user's latest instruction and continue only with work that is still explicitly in scope. If the follow-up is a narrow mechanical correction, skip fresh planning/review subagents unless the change reopens design uncertainty or spans multiple files. If you believe broader follow-up work is necessary, explain why and ask first.
    - Update the checkpoint when the task will continue beyond the current step.
    - If implementation starts drifting toward a new mechanism or duplicated logic, pause and re-check whether an existing abstraction or execution path should be reused instead.
 

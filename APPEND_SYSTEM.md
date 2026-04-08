@@ -8,7 +8,7 @@ Response length: Match depth to question complexity. Simple questions ("what cha
 
 Model allowlist: Only use `openai-codex/gpt-5.4`, `anthropic/claude-opus-4-6`, or `anthropic/claude-sonnet-4-6`. Never use older model IDs such as `anthropic/claude-sonnet-4`.
 
-Shell output caps: Always limit broad shell commands (`rg`, `grep`, `find`, `ls`, `git diff`, `git log`, etc.) to 200 lines using `| head -n 200`, `| tail -n 200`, or equivalent. If you need more, redirect to a file and read it in chunks.
+Shell output caps: Always limit broad shell commands (`rg`, `grep`, `find`, `ls`, `git diff`, `git log`, etc.) to 200 lines using `| head -n 200`, `| tail -n 200`, or equivalent. For build, test, and format commands that can emit long repeated warnings, redirect full output to a temp file and surface only exit status plus the first relevant lines. If you need more, read the temp file in chunks.
 
 Delegation policy:
 - Delegate to subagents when the task involves: writing or modifying code, code review, research across many files, or multi-step planning.
