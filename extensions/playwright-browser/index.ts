@@ -7,11 +7,10 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
-import {
-	chromium,
-	type Browser,
-	type BrowserContext,
-	type Page,
+import type {
+	Browser,
+	BrowserContext,
+	Page,
 } from "playwright";
 
 type WaitUntil = "commit" | "domcontentloaded" | "load" | "networkidle";
@@ -42,6 +41,29 @@ interface PageSnapshot extends PageMetadata {
 
 const DEFAULT_VIEWPORT = { width: 1440, height: 900 };
 let runtime: BrowserRuntime | null = null;
+let playwrightModulePromise: Promise<typeof import("playwright")> | null = null;
+
+async function loadPlaywright(): Promise<typeof import("playwright")> {
+	if (!playwrightModulePromise) {
+		playwrightModulePromise = import("playwright").catch((error: unknown) => {
+			playwrightModulePromise = null;
+			const message = error instanceof Error ? error.message : String(error);
+			throw new Error(
+				[
+					"Playwright browser tools are installed but not ready to use because the 'playwright' package could not be loaded.",
+					`Original error: ${message}`,
+					"Fix:",
+					"cd /Users/asmisha/Projects/pi-setup/extensions/playwright-browser",
+					"npm install --package-lock=false",
+					"npx playwright install chromium",
+					"Then restart pi or run /reload.",
+				].join("\n"),
+			);
+		});
+	}
+
+	return playwrightModulePromise;
+}
 
 function truncateText(text: string): string {
 	const truncated = truncateHead(text, {
@@ -278,6 +300,7 @@ export default function playwrightBrowser(pi: ExtensionAPI) {
 		async execute(_toolCallId, params) {
 			await closeRuntime();
 
+			const { chromium } = await loadPlaywright();
 			const browser = await chromium.launch({ headless: params.headless ?? true });
 			try {
 				const context = await browser.newContext({

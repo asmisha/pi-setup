@@ -83,6 +83,8 @@ Treat this as the baseline PR review pass. The reviewers should investigate the 
 
 After synthesizing the first-pass findings, do **not** stop for user discussion yet. In this skill, the pause happens only after both review cycles are complete.
 
+In both passes, treat maintainability / poor-code concerns as first-class review targets when they create real engineering risk. Do not reduce the review to correctness/security only: actively inspect for copy-paste drift, inconsistent contracts between similar paths, over-complicated flows, accidental architecture forks, dead or misleading abstractions, UI/domain mismatches, and configuration shapes that no longer match runtime behavior.
+
 ### 4. Create a first-pass handoff artifact
 
 After the first review cycle, create a structured temp-file artifact for the second cycle.
@@ -104,6 +106,7 @@ Rules:
 - Do not claim a suspected bug is real unless pass 1 actually verified it.
 - It is fine to include leads for pass 2, but label them clearly as leads to verify.
 - Prefer actionable instructions such as `compare this new path to existing helper X`, `trace authorization from A -> B -> C`, or `inspect how failure handling differs between file1 and file2`.
+- When pass 1 finds likely poor-code patterns, record them in concrete terms: what is duplicated, where contracts diverge, what abstraction is misleading, and what future bug or maintenance cost that creates.
 
 Save this handoff artifact to a temp file and keep the path.
 
@@ -154,9 +157,10 @@ Explicitly instruct them:
 
 - use the second-pass brief to focus your investigation, not to inherit conclusions
 - re-verify any pass-1 finding before repeating it
-- look for deeper, cross-file, architectural, or business-logic issues that were easier to miss on the first pass
+- look for deeper, cross-file, architectural, business-logic, or maintainability issues that were easier to miss on the first pass
 - call out when a pass-1 suspicion does not hold up after re-checking
 - return only evidence-backed findings
+- if you flag poor-code / poor practices, tie them to a concrete risk such as drift between parallel paths, harder debugging, misleading APIs, unsafe refactors, or needless complexity rather than vague style complaints
 
 Do not let the second pass degrade into a paraphrase of pass 1.
 
@@ -178,6 +182,7 @@ Rules:
 - If pass 2 weakens or disproves a pass-1 concern, say so explicitly.
 - Keep the final result priority-ordered.
 - The final synthesis should represent your best review judgment after both cycles, not a raw concatenation of two reports.
+- Do not bury serious maintainability findings just because the code "works" today. If the structure itself materially raises future bug risk, surface it clearly.
 
 ### 8. Present the final review, then pause for discussion
 

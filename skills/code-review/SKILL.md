@@ -61,6 +61,8 @@ Give each subagent:
 - Prefer evidence-backed findings over speculative concerns.
 - Explicitly check whether the change duplicates existing functionality or introduces a parallel mechanism where an existing helper, flow, or abstraction should have been reused.
 - Explicitly check whether behavior has been placed in the wrong architectural boundary, especially when a more appropriate existing path already handles comparable work.
+- Explicitly look for maintainability poor-code patterns when they create real risk: copy-pasted logic that will drift, inconsistent DTO/state shapes, hidden side effects, overly clever control flow, speculative abstractions, helper layers that add indirection without reducing complexity, UI/domain rule mismatches, and config written in one shape but read in another.
+- Flag poor coding practices only when you can tie them to a concrete cost: future bug surface, harder debugging, unsafe refactors, silent behavior divergence, or needless operational complexity.
 
 ## Token efficiency rules
 
@@ -81,6 +83,9 @@ Flag issues when a diff:
 - duplicates existing validation, signing, storage, persistence, polling, or orchestration logic instead of reusing an existing mechanism
 - introduces a second path for behavior that the codebase already centralizes elsewhere
 - places behavior in a more sensitive or user-facing boundary when an existing downstream boundary already owns similar work
+- adds "just enough abstraction to be confusing": wrappers, helpers, types, or adapters that do not reduce duplication, do not enforce a contract, and instead hide real behavior
+- spreads one feature across multiple divergent implementations without a good reason, especially when each path now has slightly different defaults, error handling, or return shapes
+- leaves code in a state where the happy path works but the resulting structure is brittle, misleading, or expensive to evolve
 
 ## Output requirements
 
