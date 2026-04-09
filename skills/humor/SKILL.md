@@ -7,7 +7,7 @@ description: Write short, roasty jokes for tech contexts like code reviews, debu
 
 Use this skill when the user wants a joke, roast, funny rewrite, or a quick comic line in a technical context.
 
-Prefer a subagent drafting pass with `model: anthropic/claude-opus-4-6` for actual joke generation or rewrites, then do a quick factual/tone pass before returning the final text.
+Always generate jokes and funny rewrites through a subagent using `model: openai-codex/gpt-5.3-codex-spark`, then do a quick factual/tone pass before returning the final text.
 
 ## Goal
 

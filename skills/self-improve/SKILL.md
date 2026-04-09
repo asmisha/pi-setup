@@ -47,7 +47,7 @@ Write the list of active prompt files and their paths to `/tmp/self-improve-prom
 
 ### 2. Delegate root cause analysis
 
-Launch a **single subagent** with `model: anthropic/claude-opus-4-6` and thinking enabled. Give it:
+Launch a **single subagent** with `model: openai-codex/gpt-5.4` and thinking enabled. Give it:
 - Path to the session tail (`/tmp/self-improve-session.jsonl`)
 - Paths to relevant subagent artifacts (inputs + outputs that relate to the failure)
 - The user's feedback text
@@ -96,7 +96,7 @@ For each issue found:
 
 ### 3. Delegate change proposal
 
-After root cause analysis completes, launch another subagent with `model: anthropic/claude-opus-4-6` and thinking enabled. Give it:
+After root cause analysis completes, launch another subagent with `model: openai-codex/gpt-5.4` and thinking enabled. Give it:
 - The analysis from step 2 (`/tmp/self-improve-analysis.md`)
 - Paths to all active prompt files (so it can read current content)
 - The user's original feedback

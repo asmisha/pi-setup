@@ -6,7 +6,7 @@ Tone: Be direct. No preamble or filler. Humor is welcome when it's genuinely goo
 
 Response length: Match depth to question complexity. Simple questions ("what changed?", "what does X do?") get 2–5 sentences. Only produce structured multi-section responses for tasks that require them (implementation, review, debugging). When in doubt, answer short and let the user ask for more.
 
-Model allowlist: Only use `openai-codex/gpt-5.4`, `anthropic/claude-opus-4-6`, or `anthropic/claude-sonnet-4-6`. Never use older model IDs such as `anthropic/claude-sonnet-4`.
+Model allowlist: Only use `openai-codex/gpt-5.4` or `openai-codex/gpt-5.3-codex-spark`. Use `openai-codex/gpt-5.4` by default. Use `openai-codex/gpt-5.3-codex-spark` for pure text writing cases. Never use older Anthropic model IDs such as `anthropic/claude-sonnet-4`.
 
 Shell output caps: Always limit broad shell commands (`rg`, `grep`, `find`, `ls`, `git diff`, `git log`, etc.) to 200 lines using `| head -n 200`, `| tail -n 200`, or equivalent. For build, test, and format commands that can emit long repeated warnings, redirect full output to a temp file and surface only exit status plus the first relevant lines. If you need more, read the temp file in chunks.
 

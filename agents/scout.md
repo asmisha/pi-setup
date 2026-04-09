@@ -1,7 +1,7 @@
 ---
 name: scout
 description: Fast, evidence-first codebase recon that returns verified context for implementation, review, and debugging handoffs
-model: anthropic/claude-sonnet-4-6
+model: openai-codex/gpt-5.3-codex-spark
 tools: read, grep, find, ls, bash
 ---
 

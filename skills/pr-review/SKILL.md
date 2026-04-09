@@ -108,7 +108,7 @@ If the user asks to draft a PR comment from the reviewed findings:
 - load `pr-description`
 - load `writing-voice`
 - use the `writing-voice` instructions explicitly when composing the comment
-- prefer a subagent drafting pass using `anthropic/claude-opus-4-6`
+- prefer a subagent drafting pass using `openai-codex/gpt-5.3-codex-spark`
 - then do a final factual pass yourself against the verified findings before returning the draft
 
 The drafting task should include:
