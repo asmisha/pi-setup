@@ -7,7 +7,7 @@ description: Write short, roasty jokes for tech contexts like code reviews, debu
 
 Use this skill when the user wants a joke, roast, funny rewrite, or a quick comic line in a technical context.
 
-Always generate jokes and funny rewrites through a subagent using `model: openai-codex/gpt-5.3-codex-spark`, then do a quick factual/tone pass before returning the final text.
+If this is the `humor` agent, generate the joke directly. Otherwise delegate once to the `humor` agent only when the user explicitly asks for humor-focused output beyond the default one-line joke, then do a quick factual/tone pass before returning the final text.
 
 ## Goal
 
