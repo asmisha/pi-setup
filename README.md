@@ -28,7 +28,7 @@ Adds a shared evidence-first instruction block to agent system prompts and regis
 See `extensions/workflow-foundation/README.md`.
 
 ### `extensions/worktree.ts`
-Adds worktree-aware Pi commands and path-sensitive tool wrappers so a session can switch into another git worktree and keep using Pi against the new working directory.
+Adds worktree-aware Pi commands and path-sensitive built-in tool handling so a session can switch into another git worktree and keep using Pi against the new working directory.
 
 See `extensions/worktree.md`.
 

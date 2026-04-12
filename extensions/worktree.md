@@ -12,7 +12,7 @@ Verified from `extensions/worktree.ts`:
   - a PR number
   - a GitHub PR URL
 - Updates Pi's status bar with the active worktree branch and, when available, PR metadata
-- Re-registers `find`, `grep`, and `ls` so relative paths resolve against the current `process.cwd()` after a worktree switch
+- Rewrites relative `path` arguments for built-in `find`, `grep`, and `ls` calls so they resolve against the current `process.cwd()` after a worktree switch
 - Patches agent system prompts so the working directory shown to the model matches the new worktree path
 
 The file comment also notes that `bash`, `read`, `write`, and `edit` are expected to be handled by a separate global worktree extension, to avoid tool conflicts.
@@ -88,7 +88,7 @@ The extension reads these values only from `conductor.json` in the target worktr
 
 ## Practical use
 
-Use this extension when you regularly hop between branch worktrees or PR worktrees and want Pi's path-sensitive tools and status bar to follow the active checkout.
+Use this extension when you regularly hop between branch worktrees or PR worktrees and want Pi's built-in path-sensitive tools and status bar to follow the active checkout.
 
 ## Limitations visible in this repo
 

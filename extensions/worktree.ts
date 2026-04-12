@@ -10,18 +10,13 @@
  * The status bar shows the branch and PR info (if applicable).
  *
  * To make tools work in the new directory, the extension:
- * - Registers path-sensitive find/grep/ls wrappers that resolve relative paths against process.cwd()
+ * - Rewrites relative path arguments for built-in find/grep/ls calls against process.cwd()
  * - Relies on the user's global worktree extension for bash/read/write/edit cwd handling
  * - Patches the system prompt to tell the LLM the correct cwd
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import {
-	createFindTool,
-	createGrepTool,
-	createLsTool,
-	BorderedLoader,
-} from "@mariozechner/pi-coding-agent";
+import { BorderedLoader } from "@mariozechner/pi-coding-agent";
 import { Container, type SelectItem, SelectList, Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { execSync, spawn as nodeSpawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -947,42 +942,33 @@ function updateStatus(ctx: ExtensionContext) {
 export default function (pi: ExtensionAPI) {
 	stopPrMetadataRefresh();
 
-	// ── Tool overrides ────────────────────────────────────────────────
-	// bash/read/write/edit are already overridden by the user's global worktree
-	// extension at ~/.pi/agent/extensions/worktree.ts. Re-registering them here
-	// causes extension tool conflicts. Keep only the extra path-sensitive tools
-	// that the global extension does not provide.
+	// ── Tool path rewriting ───────────────────────────────────────────
+	// bash/read/write/edit are already handled by the user's global worktree
+	// extension at ~/.pi/agent/extensions/worktree.ts. For find/grep/ls, avoid
+	// re-registering the tools here so custom overrides like pi-fff can win
+	// without conflicts. Instead, rewrite relative path arguments for the
+	// built-in implementations at call time against the current process.cwd().
 
-	function resolvePath(path: string): string {
-		if (!path || path.startsWith("/") || path.startsWith("~")) return path;
-		return resolve(process.cwd(), path);
+	function resolvePathForCurrentWorktree(path: string): string {
+		const normalizedPath = path.startsWith("@") ? path.slice(1) : path;
+		if (!normalizedPath || normalizedPath.startsWith("/") || normalizedPath.startsWith("~")) return normalizedPath;
+		return resolve(process.cwd(), normalizedPath);
 	}
 
-	const findBuiltin = createFindTool(originalCwd);
-	pi.registerTool({
-		name: "find",
-		description: findBuiltin.description,
-		parameters: findBuiltin.parameters,
-		execute: (id, params, signal, onUpdate, ctx) =>
-			findBuiltin.execute(id, { ...params, path: params.path ? resolvePath(params.path) : params.path }, signal, onUpdate),
-	});
+	function getActiveToolSource(toolName: string): string | null {
+		const matchingTools = pi.getAllTools().filter((tool) => tool.name === toolName);
+		return matchingTools.length > 0 ? matchingTools[matchingTools.length - 1]!.sourceInfo.source : null;
+	}
 
-	const grepBuiltin = createGrepTool(originalCwd);
-	pi.registerTool({
-		name: "grep",
-		description: grepBuiltin.description,
-		parameters: grepBuiltin.parameters,
-		execute: (id, params, signal, onUpdate, ctx) =>
-			grepBuiltin.execute(id, { ...params, path: params.path ? resolvePath(params.path) : params.path }, signal, onUpdate),
-	});
+	pi.on("tool_call", async (event) => {
+		if (event.toolName !== "find" && event.toolName !== "grep" && event.toolName !== "ls") return;
+		if (getActiveToolSource(event.toolName) !== "builtin") return;
 
-	const lsBuiltin = createLsTool(originalCwd);
-	pi.registerTool({
-		name: "ls",
-		description: lsBuiltin.description,
-		parameters: lsBuiltin.parameters,
-		execute: (id, params, signal, onUpdate, ctx) =>
-			lsBuiltin.execute(id, { ...params, path: params.path ? resolvePath(params.path) : params.path }, signal, onUpdate),
+		const input = event.input as { path?: unknown };
+		if (typeof input.path !== "string") return;
+
+		const rewrittenPath = resolvePathForCurrentWorktree(input.path);
+		if (rewrittenPath !== input.path) input.path = rewrittenPath;
 	});
 
 	// ── System prompt patch ───────────────────────────────────────────
