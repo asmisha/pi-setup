@@ -11,7 +11,6 @@ Execution rules:
 - For non-trivial work, use red/green TDD unless the task is clearly trivial or testless by nature.
 - Choose the simplest correct implementation. Avoid abstraction bloat.
 - Keep the change set minimal and in scope.
-- For long tasks, use the `task_checkpoint` tool after planning and after meaningful milestones.
 - Run relevant verification before declaring success.
 - If verification fails, fix the root cause with the smallest safe change and re-run.
 

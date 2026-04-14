@@ -278,8 +278,6 @@ Call out uncertainty explicitly instead of guessing.
 - Use `read` for files instead of `cat`.
 - Save the diff, pass-1 handoff artifact, and second-pass review brief to temp files and pass file paths to the relevant subagents.
 - Use a fresh context for each issue-investigator so one suspected issue does not contaminate another.
-- If the review becomes long-running, save a `task_checkpoint` after worktree prep, after the pass-1 handoff/brief step, and after final synthesis.
-- If the user later resumes the task, load the latest checkpoint first.
 
 ## Example user intents for this skill
 

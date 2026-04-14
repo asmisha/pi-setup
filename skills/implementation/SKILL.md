@@ -41,12 +41,7 @@ Use this skill for code changes. Optimize for the simplest high-quality solution
    - If a solution adds a new helper, token format, storage flow, validation path, or state mechanism, first verify that an equivalent or adjacent mechanism does not already exist in the codebase.
    - “Smallest” includes operational simplicity: avoid solutions that make a more sensitive path heavier, slower, or harder to reason about when the same outcome can be achieved in an existing downstream path.
 
-4. **Create or restore a checkpoint for long tasks**
-   - Use `task_checkpoint` at the start of multi-step work.
-   - Save after planning, after each meaningful milestone, and before compaction.
-   - Keep checkpoints factual: goal, verified state, files changed, checks run, remaining work, next step.
-
-5. **Use TDD by default for non-trivial changes**
+4. **Use TDD by default for non-trivial changes**
    - Bug fix: add a reproducer first.
    - Feature: add or update acceptance/behavior tests first.
    - Confirm the test/check fails for the expected reason before implementing.
@@ -54,15 +49,14 @@ Use this skill for code changes. Optimize for the simplest high-quality solution
    - Refactor only while checks remain green.
    - Skip TDD only for trivial, documentation-only, or config-only changes, and say why.
 
-6. **Implement in small verified steps**
+5. **Implement in small verified steps**
    - Read before each edit.
    - Run targeted verification immediately after each step.
    - If something fails, fix the root cause with the smallest safe change.
    - If the user corrects you, rejects part of the approach, or changes direction, stop following the old plan. Re-scope from the user's latest instruction and continue only with work that is still explicitly in scope. If the follow-up is a narrow mechanical correction, skip fresh planning/review subagents unless the change reopens design uncertainty or spans multiple files. If you believe broader follow-up work is necessary, explain why and ask first.
-   - Update the checkpoint when the task will continue beyond the current step.
    - If implementation starts drifting toward a new mechanism or duplicated logic, pause and re-check whether an existing abstraction or execution path should be reused instead.
 
-7. **Do a focused final audit**
+6. **Do a focused final audit**
    - Run the relevant test/lint/type/build/syntax commands.
    - Review the diff for accidental edits, dead code, stale comments, and unused imports.
    - For non-trivial diffs, run at least one focused review subagent before presenting results.
@@ -103,4 +97,4 @@ Use this structure in the final response:
 
 ## Reference
 
-If you need a checkpoint template or compact execution checklist, read [references/checklists.md](references/checklists.md).
+If you need a compact execution checklist, read [references/checklists.md](references/checklists.md).

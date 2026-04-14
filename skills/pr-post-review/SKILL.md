@@ -209,7 +209,6 @@ Do not post UNCERTAIN findings as inline comments, and do not choose a non-defau
 
 - Prefer temp files for the manifest, body text, and JSON payload.
 - If the diff changed after mapping, redo the mapping before posting.
-- Save a `task_checkpoint` after manifest + mapping and again before the final write if the task is long-running.
 
 ## Example user intents for this skill
 

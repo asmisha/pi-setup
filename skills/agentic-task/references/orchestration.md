@@ -7,7 +7,6 @@
 - [ ] Pass only the artifacts needed for that job
 - [ ] Require evidence, file paths, and explicit uncertainty
 - [ ] Keep synthesis separate from collection
-- [ ] Save a checkpoint if the task will continue after synthesis
 
 ## Useful reviewer combinations
 

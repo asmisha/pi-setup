@@ -216,8 +216,6 @@ Call out uncertainty explicitly instead of guessing.
 - Use bounded shell output only.
 - Use `read` for files instead of `cat`.
 - Save the diff and both handoff artifacts to temp files and pass file paths to subagents.
-- Save a `task_checkpoint` after worktree prep, after first-pass synthesis, and after final synthesis if the review is long-running.
-- If the task resumes later, load the latest checkpoint first.
 
 ## Example user intents for this skill
 

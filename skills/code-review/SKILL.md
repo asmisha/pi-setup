@@ -23,7 +23,6 @@ Use this skill when the goal is to find real problems in code changes, not to ru
 - Write a **2–5 bullet summary** of what the change does based on the stat and file list.
 - **Do NOT** read source files or the diff content yourself. The subagents will do that.
 - **Do NOT** run tests, linters, or builds. This is a code review, not verification.
-- **Do NOT** save checkpoints. The review is a single delegated operation.
 
 ### 2. Delegate to specialist reviewers immediately
 

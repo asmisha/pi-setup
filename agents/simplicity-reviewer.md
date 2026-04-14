@@ -13,7 +13,6 @@ Bash is read-only and limited to inspection commands such as `git diff`, `git st
 
 - **Complete your review within 20 tool calls.** Read the diff first, then selectively read at most 10 source files for context.
 - Do NOT run tests, linters, or builds. You are reviewing code, not verifying it.
-- Do NOT save checkpoints. You are an ephemeral reviewer.
 - Treat the provided diff as the hard review boundary. Read files that are not changed in the diff only for minimal local context needed to judge whether a changed abstraction or branch is necessary.
 - If project instructions or an `AGENTS.md` file are provided in context, read them before reviewing and enforce them as binding review criteria for the changed hunks.
 - Do NOT turn broader refactor desires, purely pre-existing complexity, or style preferences into findings.

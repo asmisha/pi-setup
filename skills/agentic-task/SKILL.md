@@ -16,7 +16,6 @@ Use this skill when the task is broad, ambiguous, or benefits from several isola
 2. **Scope the terrain**
    - Search first.
    - Use `scout` when the code or document surface is not obvious.
-   - Load or save a `task_checkpoint` for long-running work.
 
 3. **Choose the minimum useful set of subagents**
    - Prefer 2-4 focused agents over a swarm.
@@ -36,7 +35,6 @@ Use this skill when the task is broad, ambiguous, or benefits from several isola
 6. **Close with an action-oriented report**
    - Summarize what matters now.
    - Order recommendations by impact and urgency.
-   - Save a final checkpoint if the task is likely to continue.
 
 ## Output requirements
 

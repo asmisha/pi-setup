@@ -12,7 +12,7 @@ Verified top-level contents:
 - `prompts/` - reusable prompt templates
 - `themes/` - Pi theme files
 - `scripts/` - small workflow scripts
-- `APPEND_SYSTEM.md` - extra system-level guidance appended to prompts
+- `APPEND_SYSTEM.md` - extra system-level guidance appended to prompts, including the repo's evidence-first baseline
 - `AGENTS.md` - project instructions for agents working in this repo
 
 ## Extensions
@@ -22,15 +22,15 @@ Sends lightweight lifecycle hooks for Pi activity to a local Superset listener. 
 
 See `extensions/superset-lifecycle/README.md`.
 
-### `extensions/workflow-foundation/`
-Adds a shared evidence-first instruction block to agent system prompts and registers the `task_checkpoint` tool for saving and restoring concise task checkpoints by repo and branch.
-
-See `extensions/workflow-foundation/README.md`.
-
 ### `extensions/worktree.ts`
 Adds worktree-aware Pi commands and path-sensitive built-in tool handling so a session can switch into another git worktree and keep using Pi against the new working directory.
 
 See `extensions/worktree.md`.
+
+### `extensions/context-guardian/`
+Adds durable task-state snapshots, early compaction, structured custom compaction, and `/handoff` support so long sessions keep their objective and exact next action.
+
+See `extensions/context-guardian/README.md`.
 
 ## Other notable files
 

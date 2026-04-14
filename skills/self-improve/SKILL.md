@@ -39,7 +39,6 @@ The user's most recent message(s) expressing dissatisfaction — extract the spe
 **e) Collect the prompt files that were active in the session:**
 - `~/.pi/agent/AGENTS.md`
 - `~/.pi/agent/APPEND_SYSTEM.md`
-- `~/.pi/agent/extensions/workflow-foundation/index.ts` (the FOUNDATION_PROMPT)
 - Any skill SKILL.md files that were loaded (check subagent meta for `skills` field)
 - Any agent .md files that were used (check subagent meta for `agent` field, then read `~/.pi/agent/agents/<agent>.md`)
 
@@ -118,7 +117,7 @@ You are proposing precise prompt edits to fix agent behavior issues.
 3. If text is contradictory, remove the wrong part — don't add a third rule to arbitrate.
 4. If text is missing, add the minimum necessary — one precise sentence beats a paragraph.
 5. Never add subjective qualifiers ("be careful", "try to", "when appropriate"). Use concrete, testable language.
-6. Consider whether the fix belongs in APPEND_SYSTEM.md (global, always loaded), FOUNDATION_PROMPT (global, always loaded), a skill SKILL.md (loaded on demand), or an agent .md (loaded per subagent invocation). Put it in the narrowest scope that covers the problem.
+6. Consider whether the fix belongs in APPEND_SYSTEM.md (global, always loaded), a skill SKILL.md (loaded on demand), or an agent .md (loaded per subagent invocation). Put it in the narrowest scope that covers the problem.
 7. Measure the token impact: how many tokens does the edit add/remove net?
 
 ## Output format
@@ -157,7 +156,7 @@ Read `/tmp/self-improve-proposal.md` and present it to the user. For each propos
 ## Anti-patterns
 
 - Do NOT add generic "be more careful" rules. They waste tokens and don't change behavior.
-- Do NOT add rules that duplicate what FOUNDATION_PROMPT already says.
+- Do NOT add rules that duplicate what APPEND_SYSTEM.md already says.
 - Do NOT propose changes to files you haven't read.
 - Do NOT propose adding text without first checking if existing text could be edited to cover the gap.
 - Do NOT conflate "the agent made a mistake" with "the prompt needs changing" — some failures are one-off reasoning errors, not systemic prompt issues. Say so when that's the case.

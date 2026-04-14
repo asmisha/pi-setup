@@ -144,8 +144,6 @@ Call out uncertainty explicitly instead of guessing.
 - Use bounded shell output only.
 - Use `read` for files instead of `cat`.
 - Save the diff to a temp file and pass the file path to reviewers.
-- If the review becomes long-running, save a `task_checkpoint` after worktree prep and after review synthesis.
-- If the user later resumes the task, load the latest checkpoint first.
 
 ## Example user intents for this skill
 

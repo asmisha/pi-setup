@@ -11,7 +11,6 @@ The orchestrator's only job before spawning subagents is:
 **Do NOT**:
 - Read source files yourself — subagents have their own context windows
 - Run tests, linters, or builds — this is analysis, not verification
-- Save checkpoints — the review is a single delegated operation
 - Include diff content or file contents in subagent task descriptions
 
 ## Reviewer prompt skeleton
