@@ -27,6 +27,11 @@ Adds worktree-aware Pi commands and path-sensitive built-in tool handling so a s
 
 See `extensions/worktree.md`.
 
+### `extensions/bash-output-guard/`
+Caps `bash` tool result text before it enters session context, so shell-heavy investigations do not balloon the conversation as easily.
+
+See `extensions/bash-output-guard/README.md`.
+
 ### `extensions/context-guardian/`
 Adds durable task-state snapshots, early compaction, structured custom compaction, and `/handoff` support so long sessions keep their objective and exact next action.
 
