@@ -10,7 +10,7 @@ Verified from `extensions/context-guardian/index.ts`:
 - restores the latest durable task state from the current session branch on `session_start`
 - bootstraps a minimal durable task state from the first prompt when no prior state exists
 - injects the latest compaction resume packet into the system prompt on `before_agent_start`, falling back to durable task state only when no resume packet exists
-- triggers early compaction on `turn_end` when `ctx.getContextUsage().percent` crosses a soft threshold of 42%
+- triggers early compaction on `turn_end` when `ctx.getContextUsage().percent` crosses a soft threshold of 60%
 - customizes `session_before_compact` to synthesize a structured resume packet from the whole current session context and appends deterministic `<read-files>` / `<modified-files>` tags
 - registers a `task_state` tool so the model can read, patch, or clear durable task state explicitly
 - registers `/task-state` for human inspection/edit/clear operations

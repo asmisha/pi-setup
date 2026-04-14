@@ -6,7 +6,7 @@ import { Type } from "@sinclair/typebox";
 const EXTENSION_ID = "context-guardian";
 const TASK_STATE_ENTRY = `${EXTENSION_ID}-state`;
 const RESUME_MESSAGE_TYPE = `${EXTENSION_ID}-resume`;
-const SOFT_COMPACTION_THRESHOLD_PERCENT = 42;
+const SOFT_COMPACTION_THRESHOLD_PERCENT = 60;
 const MIN_COMPACTION_INTERVAL_MS = 30_000;
 const PROMPT_LIST_LIMIT = 8;
 const SUMMARY_MAX_TOKENS = 4096;
