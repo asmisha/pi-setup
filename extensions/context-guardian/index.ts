@@ -1,6 +1,6 @@
 import { complete } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext, SessionEntry } from "@mariozechner/pi-coding-agent";
-import { convertToLlm, serializeConversation } from "@mariozechner/pi-coding-agent";
+import { buildSessionContext, convertToLlm, getLatestCompactionEntry, serializeConversation } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
 const EXTENSION_ID = "context-guardian";
@@ -13,46 +13,78 @@ const SUMMARY_MAX_TOKENS = 4096;
 
 const HANDOFF_PROMPT_HEADER = `You are continuing work in a fresh Pi session. Treat the durable task state below as the source of truth, then execute the requested handoff goal.`;
 
-const TASK_STATE_SYSTEM_PROMPT_HEADER = `## Durable Task State\nUse this durable task state as the source of truth across compaction and phase changes. Prefer it over narrative history when they conflict.`;
+const TASK_STATE_SYSTEM_PROMPT_HEADER = `## Durable Task State\nUse this operator-maintained task state as concise working memory when no compaction resume packet is available. Prioritize newer explicit user instructions and the live conversation if anything conflicts.`;
 
-const COMPACTION_SYSTEM_PROMPT = `You are a context compaction assistant for a coding workflow. Produce a structured state packet, not a narrative recap.
+const RESUME_PACKET_SYSTEM_PROMPT_HEADER = `## Compaction Resume Packet\nUse this auto-generated resume packet only as condensed history for compacted older context. Prioritize the live conversation and newer explicit user instructions if anything conflicts.`;
+
+const COMPACTION_SYSTEM_PROMPT = `You are generating a strict resume packet for a coding task after compaction.
 
 Rules:
-- Keep the exact headings shown below.
-- The durable task state is the source of truth when it conflicts with the conversation slice.
-- Distinguish confirmed facts from assumptions.
-- Preserve exact next actions, blockers, file paths, command artifacts, IDs, and decisions needed to continue work.
-- Be concise but operational.
-- Do not continue the conversation.
+- Read the whole current context and decide what matters.
+- Prefer newer explicit user instructions and corrections over older plans, summaries, or stale state.
+- Focus on durable continuation context, not a narrative recap.
+- Preserve exact next actions, blockers, file paths, commands, IDs, and decisions needed to continue the work.
+- If the user rejected an answer or asked to dig deeper, the status is not completed unless the conversation later shows acceptance.
+- Keep the packet concise but operational.
+- Return only valid JSON. Do not wrap it in markdown fences or add commentary.
 
-Output format:
-## Objective
-## Success Criteria
-## Constraints & User Preferences
-## Confirmed State
-## Done
-## In Progress
-## Blockers / Risks
-## Relevant Files / Artifacts
-## Open Questions
-## Next Action
-## Facts vs Assumptions
-### Facts
-### Assumptions`;
+JSON shape:
+{
+  "objective": string | null,
+  "latestUserIntent": string | null,
+  "status": "active" | "blocked" | "completed" | "uncertain",
+  "completionReason": string | null,
+  "whyNotDone": string | null,
+  "exactNextAction": string | null,
+  "completedWork": string[],
+  "inFlightWork": string[],
+  "blockers": string[],
+  "constraints": string[],
+  "relevantFiles": string[],
+  "artifacts": [{"kind":"file|command|url|id|note","value":string,"note"?:string}],
+  "openQuestions": string[],
+  "facts": string[],
+  "assumptions": string[],
+  "avoidRepeating": string[]
+}`;
 
 const NullableString = Type.Union([Type.String(), Type.Null()]);
 
-const ArtifactKindSchema = Type.Union([
-	Type.Literal("file"),
-	Type.Literal("command"),
-	Type.Literal("url"),
-	Type.Literal("id"),
-	Type.Literal("note"),
-]);
+const ARTIFACT_KINDS = {
+	file: "file",
+	command: "command",
+	url: "url",
+	id: "id",
+	note: "note",
+} as const;
+const TASK_STATE_TOOL_ACTIONS = {
+	get: "get",
+	patch: "patch",
+	clear: "clear",
+} as const;
+const RESUME_PACKET_STATUSES = {
+	active: "active",
+	blocked: "blocked",
+	completed: "completed",
+	uncertain: "uncertain",
+} as const;
 
-const TaskActionSchema = Type.Unsafe<TaskStateToolAction>({
+type ArtifactKind = (typeof ARTIFACT_KINDS)[keyof typeof ARTIFACT_KINDS];
+type TaskStateToolAction = (typeof TASK_STATE_TOOL_ACTIONS)[keyof typeof TASK_STATE_TOOL_ACTIONS];
+type ResumePacketStatus = (typeof RESUME_PACKET_STATUSES)[keyof typeof RESUME_PACKET_STATUSES];
+
+const ARTIFACT_KIND_VALUES = Object.values(ARTIFACT_KINDS) as ArtifactKind[];
+const TASK_STATE_TOOL_ACTION_VALUES = Object.values(TASK_STATE_TOOL_ACTIONS) as TaskStateToolAction[];
+const RESUME_PACKET_STATUS_VALUES = Object.values(RESUME_PACKET_STATUSES) as ResumePacketStatus[];
+
+const ArtifactKindSchema = Type.Enum(ARTIFACT_KINDS, {
 	type: "string",
-	enum: ["get", "patch", "clear"],
+	enum: ARTIFACT_KIND_VALUES,
+});
+
+const TaskActionSchema = Type.Enum(TASK_STATE_TOOL_ACTIONS, {
+	type: "string",
+	enum: TASK_STATE_TOOL_ACTION_VALUES,
 });
 
 const TaskArtifactSchema = Type.Object({
@@ -83,8 +115,6 @@ const TaskStateToolParams = Type.Object({
 	state: Type.Optional(TaskStatePatchSchema),
 });
 
-type ArtifactKind = "file" | "command" | "url" | "id" | "note";
-
 type TaskArtifact = {
 	kind: ArtifactKind;
 	value: string;
@@ -113,7 +143,33 @@ type TaskState = {
 
 type TaskStatePatch = Partial<Omit<TaskState, "version" | "updatedAt" | "updatedBy">>;
 
-type TaskStateToolAction = "get" | "patch" | "clear";
+type ResumePacket = {
+	version: 1;
+	updatedAt: string;
+	objective: string | null;
+	latestUserIntent: string | null;
+	status: ResumePacketStatus;
+	completionReason: string | null;
+	whyNotDone: string | null;
+	exactNextAction: string | null;
+	completedWork: string[];
+	inFlightWork: string[];
+	blockers: string[];
+	constraints: string[];
+	relevantFiles: string[];
+	artifacts: TaskArtifact[];
+	openQuestions: string[];
+	facts: string[];
+	assumptions: string[];
+	avoidRepeating: string[];
+};
+
+type ResumePacketDetails = {
+	version: 1;
+	readFiles: string[];
+	modifiedFiles: string[];
+	resumePacket: ResumePacket;
+};
 
 function asTrimmedString(value: unknown): string | null {
 	if (typeof value !== "string") return null;
@@ -134,6 +190,14 @@ function normalizeStringList(value: unknown): string[] {
 	return result;
 }
 
+function mergeUniqueStrings(...lists: string[][]): string[] {
+	return normalizeStringList(lists.flat());
+}
+
+function isArtifactKind(value: unknown): value is ArtifactKind {
+	return typeof value === "string" && ARTIFACT_KIND_VALUES.includes(value as ArtifactKind);
+}
+
 function normalizeArtifacts(value: unknown): TaskArtifact[] {
 	if (!Array.isArray(value)) return [];
 	const seen = new Set<string>();
@@ -143,14 +207,17 @@ function normalizeArtifacts(value: unknown): TaskArtifact[] {
 		const kind = (item as { kind?: unknown }).kind;
 		const valueText = asTrimmedString((item as { value?: unknown }).value);
 		const note = asTrimmedString((item as { note?: unknown }).note) ?? undefined;
-		if (!valueText) continue;
-		if (kind !== "file" && kind !== "command" && kind !== "url" && kind !== "id" && kind !== "note") continue;
+		if (!valueText || !isArtifactKind(kind)) continue;
 		const key = `${kind}:${valueText}:${note ?? ""}`;
 		if (seen.has(key)) continue;
 		seen.add(key);
 		result.push({ kind, value: valueText, note });
 	}
 	return result;
+}
+
+function isResumePacketStatus(value: unknown): value is ResumePacketStatus {
+	return typeof value === "string" && RESUME_PACKET_STATUS_VALUES.includes(value as ResumePacketStatus);
 }
 
 function normalizeTaskState(input: unknown): TaskState {
@@ -182,6 +249,42 @@ function normalizeTaskState(input: unknown): TaskState {
 	};
 }
 
+function normalizeResumePacket(input: unknown): ResumePacket {
+	const data = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+	return {
+		version: 1,
+		updatedAt: asTrimmedString(data.updatedAt) ?? new Date().toISOString(),
+		objective: asTrimmedString(data.objective),
+		latestUserIntent: asTrimmedString(data.latestUserIntent),
+		status: isResumePacketStatus(data.status) ? data.status : "uncertain",
+		completionReason: asTrimmedString(data.completionReason),
+		whyNotDone: asTrimmedString(data.whyNotDone),
+		exactNextAction: asTrimmedString(data.exactNextAction),
+		completedWork: normalizeStringList(data.completedWork),
+		inFlightWork: normalizeStringList(data.inFlightWork),
+		blockers: normalizeStringList(data.blockers),
+		constraints: normalizeStringList(data.constraints),
+		relevantFiles: normalizeStringList(data.relevantFiles),
+		artifacts: normalizeArtifacts(data.artifacts),
+		openQuestions: normalizeStringList(data.openQuestions),
+		facts: normalizeStringList(data.facts),
+		assumptions: normalizeStringList(data.assumptions),
+		avoidRepeating: normalizeStringList(data.avoidRepeating),
+	};
+}
+
+function normalizeResumePacketDetails(input: unknown): ResumePacketDetails | null {
+	if (!input || typeof input !== "object") return null;
+	const data = input as Record<string, unknown>;
+	if (data.resumePacket === undefined) return null;
+	return {
+		version: 1,
+		readFiles: normalizeStringList(data.readFiles),
+		modifiedFiles: normalizeStringList(data.modifiedFiles),
+		resumePacket: normalizeResumePacket(data.resumePacket),
+	};
+}
+
 function createEmptyTaskState(updatedBy: TaskState["updatedBy"] = "manual"): TaskState {
 	return normalizeTaskState({
 		updatedBy,
@@ -204,55 +307,29 @@ function comparableStateSignature(state: TaskState | null): string {
 	return JSON.stringify(rest);
 }
 
-function renderListSection(title: string, items: string[], limit = PROMPT_LIST_LIMIT): string {
-	if (items.length === 0) return `${title}:\n- none`;
+function renderBulletList(items: string[], limit = PROMPT_LIST_LIMIT): string {
+	if (items.length === 0) return "- none";
 	const lines = items.slice(0, limit).map((item) => `- ${item}`);
 	if (items.length > limit) lines.push(`- ... (${items.length - limit} more)`);
-	return `${title}:\n${lines.join("\n")}`;
+	return lines.join("\n");
 }
 
-function renderArtifacts(items: TaskArtifact[], limit = PROMPT_LIST_LIMIT): string {
-	if (items.length === 0) return "Relevant files / artifacts:\n- none";
+function renderListSection(title: string, items: string[], limit = PROMPT_LIST_LIMIT): string {
+	return `${title}:\n${renderBulletList(items, limit)}`;
+}
+
+function renderArtifactList(items: TaskArtifact[], limit = PROMPT_LIST_LIMIT): string {
+	if (items.length === 0) return "- none";
 	const lines = items.slice(0, limit).map((artifact) => {
 		const note = artifact.note ? ` — ${artifact.note}` : "";
 		return `- [${artifact.kind}] ${artifact.value}${note}`;
 	});
 	if (items.length > limit) lines.push(`- ... (${items.length - limit} more)`);
-	return `Relevant files / artifacts:\n${lines.join("\n")}`;
+	return lines.join("\n");
 }
 
-function renderTaskStateForPrompt(state: TaskState | null): string {
-	if (!state) {
-		return [
-			TASK_STATE_SYSTEM_PROMPT_HEADER,
-			"Objective: none recorded yet",
-			"Success criteria:\n- none",
-			"Constraints & user preferences:\n- none",
-			"Done:\n- none",
-			"In progress:\n- none",
-			"Blocked:\n- none",
-			"Next action: none",
-			"Facts:\n- none",
-			"Assumptions:\n- none",
-		].join("\n\n");
-	}
-
-	return [
-		TASK_STATE_SYSTEM_PROMPT_HEADER,
-		`Objective: ${state.objective ?? "none"}`,
-		`Phase: ${state.phase ?? "none"}`,
-		renderListSection("Success criteria", state.successCriteria),
-		renderListSection("Constraints & user preferences", [...state.constraints, ...state.userPreferences]),
-		renderListSection("Done", state.done),
-		renderListSection("In progress", state.inProgress),
-		renderListSection("Blocked", state.blocked),
-		`Next action: ${state.nextAction ?? "none"}`,
-		renderListSection("Relevant files", state.relevantFiles),
-		renderArtifacts(state.artifacts),
-		renderListSection("Open questions", state.openQuestions),
-		renderListSection("Facts", state.facts),
-		renderListSection("Assumptions", state.assumptions),
-	].join("\n\n");
+function renderArtifacts(items: TaskArtifact[], limit = PROMPT_LIST_LIMIT): string {
+	return `Relevant files / artifacts:\n${renderArtifactList(items, limit)}`;
 }
 
 function renderTaskStateForHumans(state: TaskState | null): string {
@@ -276,12 +353,156 @@ function renderTaskStateForHumans(state: TaskState | null): string {
 	].join("\n\n");
 }
 
+function renderTaskStateForPrompt(state: TaskState | null): string {
+	if (!state) {
+		return [
+			TASK_STATE_SYSTEM_PROMPT_HEADER,
+			"Objective: none recorded yet",
+			"Phase: none",
+			"Success criteria:\n- none",
+			"Constraints:\n- none",
+			"User preferences:\n- none",
+			"Done:\n- none",
+			"In progress:\n- none",
+			"Blocked:\n- none",
+			"Next action: none",
+			"Relevant files:\n- none",
+			"Relevant files / artifacts:\n- none",
+			"Open questions:\n- none",
+			"Facts:\n- none",
+			"Assumptions:\n- none",
+		].join("\n\n");
+	}
+	return [
+		TASK_STATE_SYSTEM_PROMPT_HEADER,
+		`Objective: ${state.objective ?? "none"}`,
+		`Phase: ${state.phase ?? "none"}`,
+		renderListSection("Success criteria", state.successCriteria),
+		renderListSection("Constraints", state.constraints),
+		renderListSection("User preferences", state.userPreferences),
+		renderListSection("Done", state.done),
+		renderListSection("In progress", state.inProgress),
+		renderListSection("Blocked", state.blocked),
+		`Next action: ${state.nextAction ?? "none"}`,
+		renderListSection("Relevant files", state.relevantFiles),
+		renderArtifacts(state.artifacts),
+		renderListSection("Open questions", state.openQuestions),
+		renderListSection("Facts", state.facts),
+		renderListSection("Assumptions", state.assumptions),
+	].join("\n\n");
+}
+
+function renderResumePacketForPrompt(details: ResumePacketDetails | null): string {
+	if (!details) return "";
+	const packet = details.resumePacket;
+	const relevantFiles = mergeUniqueStrings(packet.relevantFiles, details.modifiedFiles, details.readFiles);
+	return [
+		RESUME_PACKET_SYSTEM_PROMPT_HEADER,
+		`Objective: ${packet.objective ?? "none"}`,
+		`Latest user intent: ${packet.latestUserIntent ?? "none"}`,
+		`Status: ${packet.status}`,
+		`Completion reason: ${packet.completionReason ?? "none"}`,
+		`Why not done: ${packet.whyNotDone ?? "none"}`,
+		`Exact next action: ${packet.exactNextAction ?? "none"}`,
+		renderListSection("Completed work", packet.completedWork),
+		renderListSection("In-flight work", packet.inFlightWork),
+		renderListSection("Blockers", packet.blockers),
+		renderListSection("Constraints", packet.constraints),
+		renderListSection("Relevant files", relevantFiles),
+		renderListSection("Read-only files from compacted history", details.readFiles),
+		renderListSection("Modified files from compacted history", details.modifiedFiles),
+		renderArtifacts(packet.artifacts),
+		renderListSection("Open questions", packet.openQuestions),
+		renderListSection("Facts", packet.facts),
+		renderListSection("Assumptions", packet.assumptions),
+		renderListSection("Avoid repeating", packet.avoidRepeating),
+	].join("\n\n");
+}
+
+function renderResumePacketSummary(details: ResumePacketDetails): string {
+	const packet = details.resumePacket;
+	const relevantFiles = mergeUniqueStrings(packet.relevantFiles, details.modifiedFiles, details.readFiles);
+	return [
+		"## Objective",
+		packet.objective ?? "none recorded",
+		"",
+		"## Latest User Intent",
+		packet.latestUserIntent ?? "none recorded",
+		"",
+		"## Status",
+		renderBulletList([
+			packet.status,
+			...(packet.completionReason ? [`completion reason: ${packet.completionReason}`] : []),
+			...(packet.whyNotDone ? [`why not done: ${packet.whyNotDone}`] : []),
+		], 20),
+		"",
+		"## Exact Next Action",
+		packet.exactNextAction ?? "none recorded",
+		"",
+		"## Completed Work",
+		renderBulletList(packet.completedWork, 20),
+		"",
+		"## In-Flight Work",
+		renderBulletList(packet.inFlightWork, 20),
+		"",
+		"## Blockers",
+		renderBulletList(packet.blockers, 20),
+		"",
+		"## Constraints",
+		renderBulletList(packet.constraints, 20),
+		"",
+		"## Relevant Files",
+		renderBulletList(relevantFiles, 20),
+		"",
+		"## Artifacts",
+		renderArtifactList(packet.artifacts, 20),
+		"",
+		"## Open Questions",
+		renderBulletList(packet.openQuestions, 20),
+		"",
+		"## Facts",
+		renderBulletList(packet.facts, 20),
+		"",
+		"## Assumptions",
+		renderBulletList(packet.assumptions, 20),
+		"",
+		"## Avoid Repeating",
+		renderBulletList(packet.avoidRepeating, 20),
+	].join("\n");
+}
+
 function loadLatestTaskState(branchEntries: SessionEntry[]): TaskState | null {
 	for (let i = branchEntries.length - 1; i >= 0; i -= 1) {
 		const entry = branchEntries[i];
 		if (!entry || entry.type !== "custom" || entry.customType !== TASK_STATE_ENTRY) continue;
 		if (entry.data === null) return null;
 		return normalizeTaskState(entry.data);
+	}
+	return null;
+}
+
+function loadLatestResumePacketDetails(branchEntries: SessionEntry[]): ResumePacketDetails | null {
+	const latestCompaction = getLatestCompactionEntry(branchEntries);
+	if (!latestCompaction) return null;
+	return normalizeResumePacketDetails(latestCompaction.details);
+}
+
+function parseJsonObject(text: string): unknown | null {
+	const candidates = [text.trim()];
+	const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+	if (fenced?.[1]) candidates.push(fenced[1].trim());
+	const firstBrace = text.indexOf("{");
+	const lastBrace = text.lastIndexOf("}");
+	if (firstBrace >= 0 && lastBrace > firstBrace) {
+		candidates.push(text.slice(firstBrace, lastBrace + 1));
+	}
+	for (const candidate of candidates) {
+		if (!candidate) continue;
+		try {
+			return JSON.parse(candidate);
+		} catch {
+			// continue
+		}
 	}
 	return null;
 }
@@ -315,27 +536,33 @@ function renderFileTags(readFiles: string[], modifiedFiles: string[]): string {
 }
 
 function buildCompactionPrompt(params: {
-	taskState: TaskState | null;
-	conversationText: string;
-	previousSummary?: string;
+	fullContextText: string;
+	previousResumePacket: ResumePacket | null;
+	turnPrefixText?: string;
 	customInstructions?: string;
 	isSplitTurn: boolean;
 }): string {
 	const parts = [
-		"Durable task state:\n",
-		renderTaskStateForHumans(params.taskState),
+		"Generate a resume packet from the whole current session context below.",
+		"The context already includes prior compaction summaries and the latest live conversation.",
+		"Use the whole context to decide what matters, but keep only durable continuation state and exact operational details in the packet.",
 	];
 
-	if (params.previousSummary) {
-		parts.push(`Previous compaction summary:\n\n${params.previousSummary}`);
+	if (params.previousResumePacket) {
+		parts.push(
+			`Previous resume packet (supplemental only; newer context wins if there is any conflict):\n\n${JSON.stringify(params.previousResumePacket, null, 2)}`,
+		);
 	}
 	if (params.customInstructions) {
 		parts.push(`Custom instructions:\n\n${params.customInstructions}`);
 	}
 	if (params.isSplitTurn) {
-		parts.push("Note: this compaction includes a split-turn prefix. Preserve any partial progress and exact next action.");
+		parts.push("Note: compaction happened mid-turn. Preserve partial work, unresolved investigations, and the exact next action.");
 	}
-	parts.push(`Conversation slice to summarize:\n\n<conversation>\n${params.conversationText}\n</conversation>`);
+	parts.push(`Whole current session context:\n\n<conversation>\n${params.fullContextText}\n</conversation>`);
+	if (params.turnPrefixText) {
+		parts.push(`Split-turn prefix messages not yet persisted as normal branch history:\n\n<turn-prefix>\n${params.turnPrefixText}\n</turn-prefix>`);
+	}
 	return parts.join("\n\n");
 }
 
@@ -421,6 +648,7 @@ async function editTaskState(ctx: ExtensionCommandContext, currentState: TaskSta
 
 export default function contextGuardian(pi: ExtensionAPI) {
 	let currentTaskState: TaskState | null = null;
+	let currentResumePacketDetails: ResumePacketDetails | null = null;
 	let lastPersistedSignature: string | null = null;
 	let previousContextPercent: number | null = null;
 	let compactionInFlight = false;
@@ -446,35 +674,38 @@ export default function contextGuardian(pi: ExtensionAPI) {
 		pi.appendEntry(TASK_STATE_ENTRY, null);
 	};
 
-	const refreshTaskStateFromBranch = (branchEntries: SessionEntry[]) => {
+	const refreshBranchState = (branchEntries: SessionEntry[]) => {
 		currentTaskState = loadLatestTaskState(branchEntries);
+		currentResumePacketDetails = loadLatestResumePacketDetails(branchEntries);
 		lastPersistedSignature = comparableStateSignature(currentTaskState);
 	};
 
 	pi.on("session_start", async (_event, ctx) => {
-		refreshTaskStateFromBranch(ctx.sessionManager.getBranch());
+		refreshBranchState(ctx.sessionManager.getBranch());
 		previousContextPercent = null;
 		compactionInFlight = false;
 	});
 
 	pi.on("session_tree", async (_event, ctx) => {
-		refreshTaskStateFromBranch(ctx.sessionManager.getBranch());
+		refreshBranchState(ctx.sessionManager.getBranch());
 		previousContextPercent = null;
 	});
 
-	pi.on("session_compact", async () => {
+	pi.on("session_compact", async (_event, ctx) => {
+		refreshBranchState(ctx.sessionManager.getBranch());
 		previousContextPercent = null;
 		compactionInFlight = false;
 		lastCompactionAt = Date.now();
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
-		refreshTaskStateFromBranch(ctx.sessionManager.getBranch());
+		refreshBranchState(ctx.sessionManager.getBranch());
 		if (!currentTaskState) {
 			persistTaskState(createBootstrapState(event.prompt), "bootstrap");
 		}
+		const injectedContext = renderResumePacketForPrompt(currentResumePacketDetails) || renderTaskStateForPrompt(currentTaskState);
 		return {
-			systemPrompt: `${event.systemPrompt}\n\n${renderTaskStateForPrompt(currentTaskState)}`,
+			systemPrompt: `${event.systemPrompt}\n\n${injectedContext}`,
 		};
 	});
 
@@ -497,7 +728,7 @@ export default function contextGuardian(pi: ExtensionAPI) {
 		compactionInFlight = true;
 		ctx.compact({
 			customInstructions:
-				"Use the durable task state as the source of truth. Preserve the exact next action, blockers, and relevant files/artifacts.",
+				"Generate a resume packet from the whole current context. Preserve the exact next action, blockers, relevant files/artifacts, and newer user corrections.",
 			onComplete: () => {
 				compactionInFlight = false;
 				lastCompactionAt = Date.now();
@@ -506,7 +737,7 @@ export default function contextGuardian(pi: ExtensionAPI) {
 					{
 						customType: RESUME_MESSAGE_TYPE,
 						content:
-							"Auto-compaction completed. Continue the interrupted task from the durable task state and the latest branch context. Do not restart from scratch.",
+							"Auto-compaction completed. Continue from the generated compaction resume packet and the latest live conversation. Prioritize newer explicit user instructions if anything conflicts. Do not restart from scratch.",
 						display: false,
 					},
 					{ triggerTurn: true },
@@ -520,16 +751,19 @@ export default function contextGuardian(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_before_compact", async (event, ctx) => {
+		refreshBranchState(event.branchEntries);
 		if (!ctx.model) return;
 		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
 		if (!auth.ok || !auth.apiKey) return;
 
-		const allMessages = [...event.preparation.messagesToSummarize, ...event.preparation.turnPrefixMessages];
-		const conversationText = serializeConversation(convertToLlm(allMessages));
+		const fullContextText = serializeConversation(convertToLlm(buildSessionContext(event.branchEntries).messages));
+		const turnPrefixText = event.preparation.turnPrefixMessages.length
+			? serializeConversation(convertToLlm(event.preparation.turnPrefixMessages))
+			: undefined;
 		const prompt = buildCompactionPrompt({
-			taskState: currentTaskState,
-			conversationText,
-			previousSummary: event.preparation.previousSummary,
+			fullContextText,
+			previousResumePacket: currentResumePacketDetails?.resumePacket ?? null,
+			turnPrefixText,
 			customInstructions: event.customInstructions,
 			isSplitTurn: event.preparation.isSplitTurn,
 		});
@@ -555,19 +789,28 @@ export default function contextGuardian(pi: ExtensionAPI) {
 					signal: event.signal,
 				},
 			);
-			const summaryBody = response.content
+			const responseText = response.content
 				.filter((item): item is { type: "text"; text: string } => item.type === "text")
 				.map((item) => item.text)
 				.join("\n")
 				.trim();
-			if (!summaryBody) return;
+			if (!responseText) return;
+
+			const parsed = parseJsonObject(responseText);
+			if (!parsed) return;
+			const details: ResumePacketDetails = {
+				version: 1,
+				readFiles,
+				modifiedFiles,
+				resumePacket: normalizeResumePacket(parsed),
+			};
 
 			return {
 				compaction: {
-					summary: `${summaryBody}\n\n${renderFileTags(readFiles, modifiedFiles)}`,
+					summary: `${renderResumePacketSummary(details)}\n\n${renderFileTags(readFiles, modifiedFiles)}`,
 					firstKeptEntryId: event.preparation.firstKeptEntryId,
 					tokensBefore: event.preparation.tokensBefore,
-					details: { readFiles, modifiedFiles },
+					details,
 				},
 			};
 		} catch {

@@ -9,9 +9,9 @@ Verified from `extensions/context-guardian/index.ts`:
 - stores branch-local durable task state snapshots with `pi.appendEntry()` under the custom entry type `context-guardian-state`
 - restores the latest durable task state from the current session branch on `session_start`
 - bootstraps a minimal durable task state from the first prompt when no prior state exists
-- injects a compact durable task-state packet into the system prompt on `before_agent_start`
+- injects the latest compaction resume packet into the system prompt on `before_agent_start`, falling back to durable task state only when no resume packet exists
 - triggers early compaction on `turn_end` when `ctx.getContextUsage().percent` crosses a soft threshold of 42%
-- customizes `session_before_compact` to produce a stricter structured summary and appends deterministic `<read-files>` / `<modified-files>` tags
+- customizes `session_before_compact` to synthesize a structured resume packet from the whole current session context and appends deterministic `<read-files>` / `<modified-files>` tags
 - registers a `task_state` tool so the model can read, patch, or clear durable task state explicitly
 - registers `/task-state` for human inspection/edit/clear operations
 - registers `/handoff` to start a new session seeded from the current durable task state and a new phase goal
@@ -49,7 +49,7 @@ This repo already uses `extensions/` for project Pi extensions, so no extra shim
 
 Use this extension when Pi starts losing the objective too early in long sessions and you want:
 
-- a durable task-state object outside the normal conversation history
+- a durable task-state object outside the normal conversation history for manual handoffs and explicit progress updates
 - earlier compaction than Pi's default overflow behavior
-- a more operational compaction summary format
+- a structured resume packet derived from the whole current context instead of treating durable task state as auto-resume ground truth
 - deliberate phase changes through `/handoff` instead of relying on compaction alone
