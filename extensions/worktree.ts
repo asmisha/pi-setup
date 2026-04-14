@@ -1,8 +1,8 @@
 /**
- * Worktree Extension — /worktree command
+ * Worktree Extension — /worktree command + worktree_create tool
  *
  * Accepts a branch name, PR number, or PR URL.
- * Creates (or reuses) a git worktree, then switches pi's working directory into it.
+ * Creates (or reuses) a git worktree and can switch pi's working directory into it.
  *
  * If `alto` CLI is available, delegates to `alto worktree new <branch> --print-path`;
  * otherwise falls back to plain `git worktree add`.
@@ -17,10 +17,11 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { BorderedLoader } from "@mariozechner/pi-coding-agent";
+import { Type } from "@sinclair/typebox";
 import { Container, type SelectItem, SelectList, Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { execSync, spawn as nodeSpawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { resolve, basename } from "node:path";
+import { basename, resolve } from "node:path";
 
 type PrChecksStatus = "passing" | "failing" | "pending" | null;
 type PrReviewDecision = "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
@@ -74,6 +75,20 @@ interface WorktreeTableLayout {
 	checksWidth: number;
 	urlWidth: number;
 }
+
+type WorktreeCreateFlag = "--shared" | "--isolated";
+type WorktreeTargetKind = "auto" | "branch";
+type ResolvedWorktreeTarget = Omit<WorktreeState, "worktreePath">;
+type CommandRunResult = { ok: boolean; output: string; stdout: string; stderr: string; aborted: boolean; timedOut: boolean };
+
+type EnsuredWorktreeResult =
+	| { kind: "cancelled" }
+	| { kind: "main"; mainRoot: string; mainBranch: string }
+	| {
+		kind: "worktree";
+		created: boolean;
+		state: WorktreeState;
+	};
 
 /** The cwd when pi started — used to detect drift and patch system prompt. */
 const originalCwd = process.cwd();
@@ -181,19 +196,23 @@ function getPrStatusLabel(
 	return state ? state.toLowerCase() : "—";
 }
 
-function getPrBranch(
+async function getPrBranchAsync(
 	prNumber: number,
 	repo: string | null,
-): { branch: string } & PrMetadata {
+	cwd: string,
+	signal?: AbortSignal,
+): Promise<({ branch: string } & PrMetadata) | null> {
 	const repoFlag = repo ? `--repo ${JSON.stringify(repo)}` : "";
-	const json = execSync(
+	const result = await runCommandAsync(
 		`gh pr view ${prNumber} ${repoFlag} --json headRefName,number,url,state,statusCheckRollup,isDraft,reviewDecision,mergeStateStatus`,
-		{
-			encoding: "utf-8",
-			timeout: 15_000,
-		},
-	).trim();
-	const data = JSON.parse(json);
+		{ cwd, signal, timeoutMs: 15_000 },
+	);
+	if (result.aborted) return null;
+	if (!result.ok) {
+		throw new Error(result.stderr.trim() || result.stdout.trim() || (result.timedOut ? "GitHub CLI request timed out" : "GitHub CLI request failed"));
+	}
+
+	const data = JSON.parse(result.stdout.trim());
 	if (typeof data.headRefName !== "string") {
 		throw new Error("GitHub CLI response missing headRefName");
 	}
@@ -345,6 +364,207 @@ function isWorktreeForRepo(worktreePath: string, repoRoot: string): boolean {
 
 function branchToDirName(branch: string): string {
 	return branch.replace(/\//g, "-");
+}
+
+function getMainBranch(mainRoot: string): string {
+	return execSync(`git -C ${JSON.stringify(mainRoot)} branch --show-current`, {
+		encoding: "utf-8",
+		timeout: 5_000,
+	}).trim();
+}
+
+function getCandidateWorktreePath(mainRoot: string, branch: string): string {
+	const repoName = basename(mainRoot);
+	const worktreeBase = resolve(mainRoot, "..", `${repoName}-wt`);
+	return resolve(worktreeBase, branchToDirName(branch));
+}
+
+function hasGitRef(repoRoot: string, ref: string): boolean {
+	try {
+		execSync(`git -C ${JSON.stringify(repoRoot)} rev-parse --verify ${JSON.stringify(ref)}`, {
+			timeout: 5_000,
+			stdio: ["ignore", "ignore", "ignore"],
+		});
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function hasAltoCli(): boolean {
+	try {
+		execSync("command -v alto", {
+			encoding: "utf-8",
+			timeout: 3_000,
+			stdio: ["ignore", "ignore", "ignore"],
+		});
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+async function resolveWorktreeTarget(
+	target: string,
+	mainRoot: string,
+	signal?: AbortSignal,
+	targetKind: WorktreeTargetKind = "auto",
+): Promise<ResolvedWorktreeTarget | null> {
+	if (signal?.aborted) return null;
+	const prInfo = targetKind === "branch" ? null : parsePrInput(target);
+
+	if (prInfo?.repo) {
+		const currentRepoSlug = getRepoSlug(mainRoot);
+		if (!currentRepoSlug) {
+			throw new Error("Couldn't determine the current GitHub repo. Switch to the correct repo before using a PR URL.");
+		}
+		if (prInfo.repo.toLowerCase() !== currentRepoSlug.toLowerCase()) {
+			throw new Error(
+				`PR repo ${prInfo.repo} does not match the current repo ${currentRepoSlug}. Switch to the correct repo first.`,
+			);
+		}
+	}
+
+	if (!prInfo) {
+		return {
+			branch: target,
+			prNumber: null,
+			prUrl: null,
+			prState: null,
+			prChecksStatus: null,
+			prIsDraft: false,
+			prReviewDecision: null,
+			prMergeStateStatus: null,
+		};
+	}
+
+	try {
+		const pr = await getPrBranchAsync(prInfo.prNumber, prInfo.repo, mainRoot, signal);
+		if (!pr) return null;
+		return {
+			branch: pr.branch,
+			prNumber: pr.prNumber,
+			prUrl: pr.prUrl,
+			prState: pr.prState,
+			prChecksStatus: pr.prChecksStatus,
+			prIsDraft: pr.prIsDraft,
+			prReviewDecision: pr.prReviewDecision,
+			prMergeStateStatus: pr.prMergeStateStatus,
+		};
+	} catch (e: any) {
+		throw new Error(`Failed to resolve PR: ${e.message}`);
+	}
+}
+
+function buildGitWorktreeCreateCommand(
+	mainRoot: string,
+	branch: string,
+	candidatePath: string,
+	prNumber: number | null,
+): string {
+	const branchExists = hasGitRef(mainRoot, `refs/heads/${branch}`) || hasGitRef(mainRoot, `refs/remotes/origin/${branch}`);
+	if (branchExists) {
+		return `git -C ${JSON.stringify(mainRoot)} worktree add ${JSON.stringify(candidatePath)} ${JSON.stringify(branch)}`;
+	}
+	if (prNumber) {
+		return `git -C ${JSON.stringify(mainRoot)} fetch origin pull/${prNumber}/head && git -C ${JSON.stringify(mainRoot)} worktree add -b ${JSON.stringify(branch)} ${JSON.stringify(candidatePath)} FETCH_HEAD`;
+	}
+	return `git -C ${JSON.stringify(mainRoot)} worktree add -b ${JSON.stringify(branch)} ${JSON.stringify(candidatePath)}`;
+}
+
+async function ensureWorktree(
+	ctx: ExtensionContext,
+	target: string,
+	flags: WorktreeCreateFlag[] = [],
+	signal?: AbortSignal,
+	targetKind: WorktreeTargetKind = "auto",
+): Promise<EnsuredWorktreeResult> {
+	const mainRoot = getMainWorktreeRoot();
+	const mainBranch = getMainBranch(mainRoot);
+	const resolvedTarget = await resolveWorktreeTarget(target, mainRoot, signal, targetKind);
+	if (!resolvedTarget) {
+		return { kind: "cancelled" };
+	}
+
+	if (resolvedTarget.branch === mainBranch) {
+		return {
+			kind: "main",
+			mainRoot,
+			mainBranch,
+		};
+	}
+
+	const candidatePath = getCandidateWorktreePath(mainRoot, resolvedTarget.branch);
+	const existingWorktreePath = findExistingWorktree(resolvedTarget.branch);
+
+	if (existingWorktreePath) {
+		return {
+			kind: "worktree",
+			created: false,
+			state: {
+				worktreePath: existingWorktreePath,
+				...resolvedTarget,
+			},
+		};
+	}
+
+	if (existsSync(candidatePath)) {
+		const candidateBranch = getWorktreeBranch(candidatePath);
+		if (candidateBranch !== resolvedTarget.branch || !isWorktreeForRepo(candidatePath, mainRoot)) {
+			throw new Error(
+				`Directory exists at ${candidatePath} but is not a valid worktree for ${resolvedTarget.branch}. Clean it up before retrying.`,
+			);
+		}
+		return {
+			kind: "worktree",
+			created: false,
+			state: {
+				worktreePath: candidatePath,
+				...resolvedTarget,
+			},
+		};
+	}
+
+	const useAlto = hasAltoCli();
+	const createCommand = useAlto
+		? `alto worktree new ${JSON.stringify(resolvedTarget.branch)} --print-path${flags.length > 0 ? ` ${flags.join(" ")}` : ""}`
+		: buildGitWorktreeCreateCommand(mainRoot, resolvedTarget.branch, candidatePath, resolvedTarget.prNumber);
+
+	const result = await runCommandWithLoader(
+		ctx,
+		`Creating worktree for ${resolvedTarget.branch}...`,
+		createCommand,
+		mainRoot,
+		signal,
+	);
+
+	if (!result) {
+		return { kind: "cancelled" };
+	}
+
+	if (!result.ok) {
+		throw new Error(`Failed to create worktree:\n${result.output}`);
+	}
+
+	const worktreePath = useAlto
+		? (() => {
+			const printedPath = result.output.trim().split("\n").pop()?.trim();
+			return printedPath && existsSync(printedPath) ? printedPath : candidatePath;
+		})()
+		: candidatePath;
+
+	if (!existsSync(worktreePath)) {
+		throw new Error(`Worktree created but path not found at ${worktreePath}`);
+	}
+
+	return {
+		kind: "worktree",
+		created: true,
+		state: {
+			worktreePath,
+			...resolvedTarget,
+		},
+	};
 }
 
 function readConductorScripts(worktreePath: string): ConductorScripts | null {
@@ -501,36 +721,84 @@ async function removeWorktree(ctx: ExtensionContext, worktree: WorktreeListItem)
 
 function runCommandAsync(
 	command: string,
-	options: { cwd?: string; signal?: AbortSignal },
-): Promise<{ ok: boolean; output: string; aborted: boolean }> {
+	options: { cwd?: string; signal?: AbortSignal; timeoutMs?: number },
+): Promise<CommandRunResult> {
 	return new Promise((resolve) => {
+		if (options.signal?.aborted) {
+			resolve({ ok: false, output: "", stdout: "", stderr: "", aborted: true, timedOut: false });
+			return;
+		}
+
+		const useProcessGroup = process.platform !== "win32";
 		const child = nodeSpawn(command, {
 			cwd: options.cwd,
 			stdio: ["ignore", "pipe", "pipe"],
 			shell: true,
+			detached: useProcessGroup,
 		});
 
-		let output = "";
+		let stdout = "";
+		let stderr = "";
 		let aborted = false;
-		child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
-		child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+		let timedOut = false;
+		let settled = false;
+		let exited = false;
+		child.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+		child.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
 
+		const signalChild = (signal: NodeJS.Signals) => {
+			try {
+				if (useProcessGroup && child.pid) {
+					process.kill(-child.pid, signal);
+				} else {
+					child.kill(signal);
+				}
+			} catch (e: any) {
+				if (e?.code !== "ESRCH") throw e;
+			}
+		};
+		const killChild = () => {
+			signalChild("SIGTERM");
+			setTimeout(() => {
+				if (!exited && child.exitCode === null) signalChild("SIGKILL");
+			}, 3_000);
+		};
 		const onAbort = () => {
 			aborted = true;
-			child.kill("SIGTERM");
-			// Give it a moment then force-kill
-			setTimeout(() => { if (!child.killed) child.kill("SIGKILL"); }, 3_000);
+			killChild();
 		};
-		options.signal?.addEventListener("abort", onAbort, { once: true });
+		const timeoutId = options.timeoutMs
+			? setTimeout(() => {
+				timedOut = true;
+				stderr ||= `Command timed out after ${options.timeoutMs}ms`;
+				killChild();
+			}, options.timeoutMs)
+			: null;
+		const finish = (code: number | null, errorMessage?: string) => {
+			if (settled) return;
+			settled = true;
+			exited = true;
+			if (timeoutId) clearTimeout(timeoutId);
+			options.signal?.removeEventListener("abort", onAbort);
+			if (errorMessage) {
+				stderr = stderr ? `${stderr}\n${errorMessage}` : errorMessage;
+			}
+			const output = `${stdout}${stderr}`;
+			resolve({
+				ok: code === 0 && !aborted && !timedOut && !errorMessage,
+				output,
+				stdout,
+				stderr,
+				aborted,
+				timedOut,
+			});
+		};
 
-		child.on("close", (code) => {
-			options.signal?.removeEventListener("abort", onAbort);
-			resolve({ ok: code === 0 && !aborted, output, aborted });
-		});
-		child.on("error", (err) => {
-			options.signal?.removeEventListener("abort", onAbort);
-			resolve({ ok: false, output: err.message, aborted });
-		});
+		options.signal?.addEventListener("abort", onAbort, { once: true });
+		if (options.signal?.aborted) onAbort();
+
+		child.on("close", (code) => finish(code));
+		child.on("error", (err) => finish(null, err.message));
 	});
 }
 
@@ -539,16 +807,27 @@ async function runCommandWithLoader(
 	message: string,
 	command: string,
 	cwd: string,
+	signal?: AbortSignal,
 ): Promise<{ ok: boolean; output: string } | null> {
+	const commandSignal = signal ?? ctx.signal;
+	if (!ctx.hasUI) {
+		const res = await runCommandAsync(command, {
+			cwd,
+			signal: commandSignal,
+		});
+		return res.aborted ? null : { ok: res.ok, output: res.ok ? res.stdout : res.output };
+	}
+
 	return ctx.ui.custom<{ ok: boolean; output: string } | null>(
 		(tui, theme, _kb, done) => {
 			const loader = new BorderedLoader(tui, theme, `${message} (Esc to cancel)`);
 			loader.onAbort = () => {};
+			const combinedSignal = commandSignal ? AbortSignal.any([loader.signal, commandSignal]) : loader.signal;
 
 			runCommandAsync(command, {
 				cwd,
-				signal: loader.signal,
-			}).then((res) => done(res.aborted ? null : { ok: res.ok, output: res.output }));
+				signal: combinedSignal,
+			}).then((res) => done(res.aborted ? null : { ok: res.ok, output: res.ok ? res.stdout : res.output }));
 
 			return loader;
 		},
@@ -581,11 +860,11 @@ async function getBranchPrInfoAsync(
 ): Promise<PrMetadata | null> {
 	try {
 		const result = await runCommandAsync(
-			`gh pr view ${JSON.stringify(branch)} --json number,url,state,statusCheckRollup,isDraft,reviewDecision,mergeStateStatus 2>/dev/null`,
-			{ cwd, signal },
+			`gh pr view ${JSON.stringify(branch)} --json number,url,state,statusCheckRollup,isDraft,reviewDecision,mergeStateStatus`,
+			{ cwd, signal, timeoutMs: 15_000 },
 		);
 		if (!result.ok || result.aborted) return null;
-		return parsePrMetadata(JSON.parse(result.output.trim()));
+		return parsePrMetadata(JSON.parse(result.stdout.trim()));
 	} catch {
 		return null;
 	}
@@ -658,10 +937,10 @@ async function switchToMainWorktree(ctx: ExtensionContext, mainRoot: string, mai
 	const setupNote = await runSetupIfPresent(ctx, mainRoot, mainBranch);
 	const parts = [`Switched to main worktree: ${mainRoot}`];
 	if (setupNote) parts.push(setupNote);
-	ctx.ui.notify(parts.join("\n"), setupNote && setupNote !== "Setup completed" ? "warning" : "success");
+	ctx.ui.notify(parts.join("\n"), setupNote === "Setup cancelled" ? "info" : setupNote && setupNote !== "Setup completed" ? "warning" : "success");
 }
 
-async function switchToExistingWorktree(ctx: ExtensionContext, nextState: WorktreeState): Promise<void> {
+async function switchToExistingWorktree(ctx: ExtensionContext, nextState: WorktreeState, signal?: AbortSignal): Promise<void> {
 	try {
 		process.chdir(nextState.worktreePath);
 	} catch (e: any) {
@@ -670,8 +949,8 @@ async function switchToExistingWorktree(ctx: ExtensionContext, nextState: Worktr
 	}
 
 	let { prNumber, prUrl, prState, prChecksStatus, prIsDraft, prReviewDecision, prMergeStateStatus } = nextState;
-	if (!prNumber && !nextState.branch.startsWith("(")) {
-		const branchPrInfo = getBranchPrInfo(nextState.branch);
+	if (!signal?.aborted && !prNumber && !nextState.branch.startsWith("(")) {
+		const branchPrInfo = await getBranchPrInfoAsync(nextState.branch, nextState.worktreePath, signal);
 		if (branchPrInfo) {
 			prNumber = branchPrInfo.prNumber;
 			prUrl = branchPrInfo.prUrl;
@@ -703,7 +982,7 @@ async function switchToExistingWorktree(ctx: ExtensionContext, nextState: Worktr
 	const parts = [`Switched to worktree: ${nextState.worktreePath}`, `Branch: ${nextState.branch}`];
 	if (prUrl) parts.push(`PR: ${prUrl}`);
 	if (setupNote) parts.push(setupNote);
-	ctx.ui.notify(parts.join("\n"), setupNote && setupNote !== "Setup completed" ? "warning" : "success");
+	ctx.ui.notify(parts.join("\n"), setupNote === "Setup cancelled" ? "info" : setupNote && setupNote !== "Setup completed" ? "warning" : "success");
 }
 
 async function showWorktreeSelector(ctx: ExtensionContext): Promise<WorktreeListItem | null> {
@@ -982,6 +1261,90 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
+	pi.registerTool({
+		name: "worktree_create",
+		label: "Worktree Create",
+		description: "Create or reuse a git worktree from a branch name, PR number, or GitHub PR URL.",
+		promptSnippet: "Create or reuse a git worktree for a branch, PR number, or PR URL and return its path.",
+		promptGuidelines: [
+			"Use this instead of shelling out to git worktree when you want the worktree extension's PR resolution and reuse behavior.",
+			"Use the returned worktreePath for follow-up work; this tool does not switch the active Pi session.",
+			"Set targetKind to branch when target should be interpreted literally as a branch name instead of a PR reference or the main-worktree alias.",
+		],
+		parameters: Type.Object({
+			target: Type.String({ description: "Branch name, PR number, or GitHub PR URL." }),
+			targetKind: Type.Optional(
+				Type.Union([
+					Type.Literal("auto"),
+					Type.Literal("branch"),
+				], { description: "How to interpret target. Use branch to force target to be treated as a branch name. Defaults to auto." }),
+			),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const target = params.target.trim();
+			if (!target) {
+				throw new Error("target must not be empty");
+			}
+
+			const targetKind = params.targetKind === "branch" ? "branch" : "auto";
+			const details = { target, targetKind };
+			if (target === "main" && targetKind !== "branch") {
+				if (signal?.aborted) {
+					return {
+						content: [{ type: "text", text: "Worktree creation cancelled." }],
+						details: { ...details, cancelled: true },
+					};
+				}
+				const mainRoot = getMainWorktreeRoot();
+				const mainBranch = getMainBranch(mainRoot);
+				return {
+					content: [{ type: "text", text: `Main worktree: ${mainRoot}` }],
+					details: {
+						...details,
+						branch: mainBranch,
+						worktreePath: mainRoot,
+					},
+				};
+			}
+			const result = await ensureWorktree(ctx, target, [], signal, targetKind);
+			if (result.kind === "cancelled") {
+				return {
+					content: [{ type: "text", text: "Worktree creation cancelled." }],
+					details: { ...details, cancelled: true },
+				};
+			}
+
+			if (result.kind === "main") {
+				return {
+					content: [{ type: "text", text: `Main worktree: ${result.mainRoot}` }],
+					details: {
+						...details,
+						branch: result.mainBranch,
+						worktreePath: result.mainRoot,
+					},
+				};
+			}
+
+			const lines = [
+				`${result.created ? "Created" : "Reused"} worktree: ${result.state.worktreePath}`,
+				`Branch: ${result.state.branch}`,
+			];
+			if (result.state.prUrl) lines.push(`PR: ${result.state.prUrl}`);
+
+			return {
+				content: [{ type: "text", text: lines.join("\n") }],
+				details: {
+					...details,
+					branch: result.state.branch,
+					worktreePath: result.state.worktreePath,
+					prNumber: result.state.prNumber,
+					prUrl: result.state.prUrl,
+					created: result.created,
+				},
+			};
+		},
+	});
+
 	// ── /wt command ───────────────────────────────────────────────────
 
 	pi.registerCommand("wt", {
@@ -1029,7 +1392,7 @@ export default function (pi: ExtensionAPI) {
 				prIsDraft: selected.prIsDraft,
 				prReviewDecision: selected.prReviewDecision,
 				prMergeStateStatus: selected.prMergeStateStatus,
-			});
+			}, ctx.signal);
 		},
 	});
 
@@ -1134,7 +1497,7 @@ export default function (pi: ExtensionAPI) {
 
 			// Parse arguments
 			const tokens = input.split(/\s+/);
-			const flags: string[] = [];
+			const flags: WorktreeCreateFlag[] = [];
 			let target = "";
 			for (const tok of tokens) {
 				if (tok.startsWith("--")) {
@@ -1154,157 +1517,25 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			let branch: string;
-			let prNumber: number | null = null;
-			let prUrl: string | null = null;
-			let prState: string | null = null;
-			let prChecksStatus: PrChecksStatus = null;
-			let prIsDraft = false;
-			let prReviewDecision: PrReviewDecision = null;
-			let prMergeStateStatus: PrMergeStateStatus = null;
-
-			const prInfo = parsePrInput(target);
-			if (prInfo) {
-				ctx.ui.notify(`Resolving PR #${prInfo.prNumber}...`, "info");
-				try {
-					const pr = getPrBranch(prInfo.prNumber, prInfo.repo);
-					branch = pr.branch;
-					prNumber = pr.prNumber;
-					prUrl = pr.prUrl;
-					prState = pr.prState;
-					prChecksStatus = pr.prChecksStatus;
-					prIsDraft = pr.prIsDraft;
-					prReviewDecision = pr.prReviewDecision;
-					prMergeStateStatus = pr.prMergeStateStatus;
-					ctx.ui.notify(`PR #${prNumber} → branch: ${branch}`, "info");
-				} catch (e: any) {
-					ctx.ui.notify(`Failed to resolve PR: ${e.message}`, "error");
-					return;
-				}
-			} else {
-				branch = target;
-			}
-
-			// Check if switching to main worktree
-			const mainRoot = getMainWorktreeRoot();
-			const currentRepoSlug = getRepoSlug(mainRoot);
-			if (prInfo?.repo && !currentRepoSlug) {
-				ctx.ui.notify("Couldn't determine the current GitHub repo. Switch to the correct repo before using a PR URL.", "error");
-				return;
-			}
-			if (prInfo?.repo && currentRepoSlug && prInfo.repo.toLowerCase() !== currentRepoSlug.toLowerCase()) {
-				ctx.ui.notify(
-					`PR repo ${prInfo.repo} does not match the current repo ${currentRepoSlug}. Switch to the correct repo first.`,
-					"error",
-				);
-				return;
-			}
-			const mainBranch = execSync("git -C " + JSON.stringify(mainRoot) + " branch --show-current", {
-				encoding: "utf-8",
-				timeout: 5_000,
-			}).trim();
-
-			if (branch === mainBranch) {
-				await switchToMainWorktree(ctx, mainRoot, mainBranch);
+			let worktreeResult: EnsuredWorktreeResult;
+			try {
+				worktreeResult = await ensureWorktree(ctx, target, flags, ctx.signal);
+			} catch (e: any) {
+				ctx.ui.notify(e.message, "error");
 				return;
 			}
 
-			// Check if worktree already exists
-			let worktreePath = findExistingWorktree(branch);
-
-			// Resolve worktree path: git-registered → dir-on-disk → create new
-			const dirName = branchToDirName(branch);
-			const repoName = basename(mainRoot);
-			const worktreeBase = resolve(mainRoot, "..", `${repoName}-wt`);
-			const candidatePath = resolve(worktreeBase, dirName);
-
-			if (worktreePath) {
-				ctx.ui.notify(`Worktree found for ${branch}, switching...`, "info");
-			} else if (existsSync(candidatePath)) {
-				const candidateBranch = getWorktreeBranch(candidatePath);
-				if (candidateBranch === branch && isWorktreeForRepo(candidatePath, mainRoot)) {
-					worktreePath = candidatePath;
-					ctx.ui.notify(`Worktree directory exists at ${candidatePath}, switching...`, "info");
-				} else {
-					ctx.ui.notify(
-						`Directory exists at ${candidatePath} but is not a valid worktree for ${branch}. Clean it up before retrying.`,
-						"error",
-					);
-					return;
-				}
-			} else {
-				// Nothing exists — create with a spinner (cancellable with Escape)
-				const hasAlto = (() => {
-					try {
-						execSync("command -v alto", { encoding: "utf-8", timeout: 3_000 });
-						return true;
-					} catch { return false; }
-				})();
-
-				const createCmd = hasAlto
-					? `alto worktree new ${JSON.stringify(branch)} --print-path ${flags.join(" ")}`
-					: (() => {
-						const localBranchExists = execSync(`git -C ${JSON.stringify(mainRoot)} branch --list ${JSON.stringify(branch)}`, {
-							encoding: "utf-8",
-						}).trim();
-						const remoteBranchExists = execSync(`git -C ${JSON.stringify(mainRoot)} branch -r --list origin/${JSON.stringify(branch)}`, {
-							encoding: "utf-8",
-						}).trim();
-						if (localBranchExists || remoteBranchExists) {
-							return `git worktree add ${JSON.stringify(candidatePath)} ${JSON.stringify(branch)}`;
-						}
-						if (prNumber) {
-							return `git -C ${JSON.stringify(mainRoot)} fetch origin pull/${prNumber}/head && git -C ${JSON.stringify(mainRoot)} worktree add -b ${JSON.stringify(branch)} ${JSON.stringify(candidatePath)} FETCH_HEAD`;
-						}
-						return `git worktree add -b ${JSON.stringify(branch)} ${JSON.stringify(candidatePath)}`;
-					})();
-
-				const result = await runCommandWithLoader(
-					ctx,
-					`Creating worktree for ${branch}...`,
-					createCmd,
-					mainRoot,
-				);
-
-				if (!result) {
-					ctx.ui.notify("Worktree creation cancelled.", "info");
-					return;
-				}
-
-				if (!result.ok) {
-					ctx.ui.notify(`Failed to create worktree:\n${result.output}`, "error");
-					return;
-				}
-
-				if (hasAlto) {
-					// alto worktree new --print-path outputs the path on the last stdout line
-					const printedPath = result.output.trim().split("\n").pop()?.trim();
-					if (printedPath && existsSync(printedPath)) {
-						worktreePath = printedPath;
-					} else {
-						worktreePath = candidatePath;
-					}
-				} else {
-					worktreePath = candidatePath;
-				}
-
-				if (!existsSync(worktreePath)) {
-					ctx.ui.notify(`Worktree created but path not found at ${worktreePath}`, "error");
-					return;
-				}
+			if (worktreeResult.kind === "cancelled") {
+				ctx.ui.notify("Worktree creation cancelled.", "info");
+				return;
 			}
 
-			await switchToExistingWorktree(ctx, {
-				worktreePath,
-				branch,
-				prNumber,
-				prUrl,
-				prState,
-				prChecksStatus,
-				prIsDraft,
-				prReviewDecision,
-				prMergeStateStatus,
-			});
+			if (worktreeResult.kind === "main") {
+				await switchToMainWorktree(ctx, worktreeResult.mainRoot, worktreeResult.mainBranch);
+				return;
+			}
+
+			await switchToExistingWorktree(ctx, worktreeResult.state, ctx.signal);
 		},
 	});
 

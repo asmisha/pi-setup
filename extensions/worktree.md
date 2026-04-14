@@ -1,6 +1,6 @@
 # worktree
 
-Pi extension for switching the active session into another git worktree without leaving Pi.
+Pi extension for switching the active session into another git worktree without leaving Pi, and for exposing worktree creation to agents.
 
 ## What it does
 
@@ -11,13 +11,17 @@ Verified from `extensions/worktree.ts`:
   - a branch name
   - a PR number
   - a GitHub PR URL
+- Registers `worktree_create` so agents can create or reuse a worktree from:
+  - a branch name
+  - a PR number
+  - a GitHub PR URL
 - Updates Pi's status bar with the active worktree branch and, when available, PR metadata
 - Rewrites relative `path` arguments for built-in `find`, `grep`, and `ls` calls so they resolve against the current `process.cwd()` after a worktree switch
 - Patches agent system prompts so the working directory shown to the model matches the new worktree path
 
 The file comment also notes that `bash`, `read`, `write`, and `edit` are expected to be handled by a separate global worktree extension, to avoid tool conflicts.
 
-## Commands
+## Commands and tools
 
 ### `/wt`
 Opens an interactive selector listing known git worktrees.
@@ -48,6 +52,23 @@ Verified optional flags:
 - `--isolated`
 
 These flags are only passed through when the extension creates a worktree with `alto worktree new`.
+
+### `worktree_create`
+LLM-callable tool for agents.
+
+Verified parameters from `extensions/worktree.ts`:
+
+- `target` — branch name, PR number, or GitHub PR URL
+- `targetKind` — optional; defaults to `auto`, or use `branch` to force the target to be treated as a branch name instead of PR input or the `main` alias
+
+Verified behavior:
+
+- reuses an existing worktree when one already exists for the branch
+- reuses the candidate worktree directory when it is already a valid worktree for the same repo and branch
+- creates a new worktree when needed
+- returns the resolved `worktreePath` to the agent
+- does not switch the current Pi session; session switching remains in `/worktree`
+- accepts `target: "main"` as an alias for the current main-worktree branch and returns the main worktree path without switching the session
 
 ## How worktree creation works
 
