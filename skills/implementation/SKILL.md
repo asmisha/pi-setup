@@ -27,7 +27,7 @@ Use this skill for code changes. Optimize for the simplest high-quality solution
      - at least one simpler alternative
      - whether the proposed change belongs in the current execution boundary
      - whether the change duplicates existing functionality or introduces a new path that existing code could cover
-   - Do not accept the requested implementation shape as fixed.
+   - Do not accept the requested implementation shape as fixed for new code paths; when the task is to update an existing file or document, preserve its structure and make the smallest in-place edit unless the user explicitly asked for a rewrite or approved a concrete restructuring need.
    - If the chosen solution is not the simplest one, explain why the extra complexity is justified.
    - If that justification is weak, unverified, or based on assumptions, stop and revisit the plan before coding.
    - Prefer extending an existing mechanism over creating a parallel one unless you can verify that the existing mechanism is unsuitable.
