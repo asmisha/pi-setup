@@ -13,19 +13,20 @@ const SUMMARY_MAX_TOKENS = 4096;
 
 const HANDOFF_PROMPT_HEADER = `You are continuing work in a fresh Pi session. Treat the durable task state below as the source of truth, then execute the requested handoff goal.`;
 
-const TASK_STATE_SYSTEM_PROMPT_HEADER = `## Durable Task State\nUse this operator-maintained task state as concise working memory when no compaction resume packet is available. Prioritize newer explicit user instructions and the live conversation if anything conflicts.`;
-
-const RESUME_PACKET_SYSTEM_PROMPT_HEADER = `## Compaction Resume Packet\nUse this auto-generated resume packet only as condensed history for compacted older context. Prioritize the live conversation and newer explicit user instructions if anything conflicts.`;
+const TASK_STATE_SYSTEM_PROMPT_HEADER = `## Durable Task State\nUse this operator-maintained task state as concise working memory alongside any compaction summary. Prioritize newer explicit user instructions and the live conversation if anything conflicts.`;
 
 const COMPACTION_SYSTEM_PROMPT = `You are generating a strict resume packet for a coding task after compaction.
 
 Rules:
-- Read the whole current context and decide what matters.
-- Prefer newer explicit user instructions and corrections over older plans, summaries, or stale state.
-- Focus on durable continuation context, not a narrative recap.
+- Read the whole current context and decide what still matters for the next 1-3 turns.
+- Prefer newer explicit user instructions and corrections over older plans, summaries, stale state, synthetic control messages, and low-signal nudges like "proceed" or "continue".
+- Focus on durable continuation context, not a narrative recap or a historical archive.
 - Preserve exact next actions, blockers, file paths, commands, IDs, and decisions needed to continue the work.
+- Drop stale branches, superseded plans, exhaustive inventories, and old detail that no longer constrains the task.
+- Keep \`relevantFiles\` tight: only files needed to continue the current active work.
+- Keep \`artifacts\` only when they are still actionable, \`openQuestions\` only when unresolved and decision-relevant, and \`assumptions\` only when fragile and important.
+- Lists should usually be short. If a section has nothing important, return an empty list instead of filler.
 - If the user rejected an answer or asked to dig deeper, the status is not completed unless the conversation later shows acceptance.
-- Keep the packet concise but operational.
 - Return only valid JSON. Do not wrap it in markdown fences or add commentary.
 
 JSON shape:
@@ -47,6 +48,19 @@ JSON shape:
   "assumptions": string[],
   "avoidRepeating": string[]
 }`;
+
+const LOW_SIGNAL_USER_NUDGES = new Set([
+	"continue",
+	"proceed",
+	"go ahead",
+	"keep going",
+	"carry on",
+	"please continue",
+	"please proceed",
+	"ok",
+	"okay",
+	"sounds good",
+]);
 
 const NullableString = Type.Union([Type.String(), Type.Null()]);
 
@@ -166,10 +180,12 @@ type ResumePacket = {
 
 type ResumePacketDetails = {
 	version: 1;
-	readFiles: string[];
-	modifiedFiles: string[];
 	resumePacket: ResumePacket;
+	readFiles?: string[];
+	modifiedFiles?: string[];
 };
+
+type ContextMessage = ReturnType<typeof buildSessionContext>["messages"][number];
 
 function asTrimmedString(value: unknown): string | null {
 	if (typeof value !== "string") return null;
@@ -188,10 +204,6 @@ function normalizeStringList(value: unknown): string[] {
 		result.push(text);
 	}
 	return result;
-}
-
-function mergeUniqueStrings(...lists: string[][]): string[] {
-	return normalizeStringList(lists.flat());
 }
 
 function isArtifactKind(value: unknown): value is ArtifactKind {
@@ -277,12 +289,63 @@ function normalizeResumePacketDetails(input: unknown): ResumePacketDetails | nul
 	if (!input || typeof input !== "object") return null;
 	const data = input as Record<string, unknown>;
 	if (data.resumePacket === undefined) return null;
+	const readFiles = normalizeStringList(data.readFiles);
+	const modifiedFiles = normalizeStringList(data.modifiedFiles);
 	return {
 		version: 1,
-		readFiles: normalizeStringList(data.readFiles),
-		modifiedFiles: normalizeStringList(data.modifiedFiles),
+		...(readFiles.length ? { readFiles } : {}),
+		...(modifiedFiles.length ? { modifiedFiles } : {}),
 		resumePacket: normalizeResumePacket(data.resumePacket),
 	};
+}
+
+function extractTextFromContent(content: unknown): string | null {
+	if (typeof content === "string") return asTrimmedString(content);
+	if (!Array.isArray(content)) return null;
+	const text = content
+		.filter((part): part is { type: string; text?: string } => Boolean(part) && typeof part === "object" && "type" in part)
+		.filter((part) => part.type === "text" && typeof part.text === "string")
+		.map((part) => part.text)
+		.join("");
+	return asTrimmedString(text);
+}
+
+function normalizeNudgeText(text: string): string {
+	return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function isLowSignalUserNudge(text: string): boolean {
+	return LOW_SIGNAL_USER_NUDGES.has(normalizeNudgeText(text));
+}
+
+function getLatestSubstantiveUserIntentFromMessages(messages: ContextMessage[]): string | null {
+	for (let i = messages.length - 1; i >= 0; i -= 1) {
+		const message = messages[i];
+		if (!message || message.role !== "user") continue;
+		const text = extractTextFromContent(message.content);
+		if (text && !isLowSignalUserNudge(text)) return text;
+	}
+	return null;
+}
+
+function getLatestSubstantiveUserIntent(branchEntries: SessionEntry[], extraMessages: ContextMessage[] = []): string | null {
+	const extraIntent = getLatestSubstantiveUserIntentFromMessages(extraMessages);
+	if (extraIntent) return extraIntent;
+	for (let i = branchEntries.length - 1; i >= 0; i -= 1) {
+		const entry = branchEntries[i];
+		if (!entry || entry.type !== "message" || entry.message.role !== "user") continue;
+		const text = extractTextFromContent(entry.message.content);
+		if (text && !isLowSignalUserNudge(text)) return text;
+	}
+	return null;
+}
+
+function isSyntheticResumeMessage(message: ContextMessage): boolean {
+	return message.role === "custom" && (message as { customType?: unknown }).customType === RESUME_MESSAGE_TYPE;
+}
+
+function filterCompactionMessages(messages: ContextMessage[]): ContextMessage[] {
+	return messages.filter((message) => !isSyntheticResumeMessage(message));
 }
 
 function createEmptyTaskState(updatedBy: TaskState["updatedBy"] = "manual"): TaskState {
@@ -392,37 +455,14 @@ function renderTaskStateForPrompt(state: TaskState | null): string {
 	].join("\n\n");
 }
 
-function renderResumePacketForPrompt(details: ResumePacketDetails | null): string {
-	if (!details) return "";
-	const packet = details.resumePacket;
-	const relevantFiles = mergeUniqueStrings(packet.relevantFiles, details.modifiedFiles, details.readFiles);
-	return [
-		RESUME_PACKET_SYSTEM_PROMPT_HEADER,
-		`Objective: ${packet.objective ?? "none"}`,
-		`Latest user intent: ${packet.latestUserIntent ?? "none"}`,
-		`Status: ${packet.status}`,
-		`Completion reason: ${packet.completionReason ?? "none"}`,
-		`Why not done: ${packet.whyNotDone ?? "none"}`,
-		`Exact next action: ${packet.exactNextAction ?? "none"}`,
-		renderListSection("Completed work", packet.completedWork),
-		renderListSection("In-flight work", packet.inFlightWork),
-		renderListSection("Blockers", packet.blockers),
-		renderListSection("Constraints", packet.constraints),
-		renderListSection("Relevant files", relevantFiles),
-		renderListSection("Read-only files from compacted history", details.readFiles),
-		renderListSection("Modified files from compacted history", details.modifiedFiles),
-		renderArtifacts(packet.artifacts),
-		renderListSection("Open questions", packet.openQuestions),
-		renderListSection("Facts", packet.facts),
-		renderListSection("Assumptions", packet.assumptions),
-		renderListSection("Avoid repeating", packet.avoidRepeating),
-	].join("\n\n");
+function appendOptionalSummarySection(lines: string[], title: string, items: string[], limit = 20) {
+	if (items.length === 0) return;
+	lines.push("", `## ${title}`, renderBulletList(items, limit));
 }
 
 function renderResumePacketSummary(details: ResumePacketDetails): string {
 	const packet = details.resumePacket;
-	const relevantFiles = mergeUniqueStrings(packet.relevantFiles, details.modifiedFiles, details.readFiles);
-	return [
+	const lines = [
 		"## Objective",
 		packet.objective ?? "none recorded",
 		"",
@@ -438,37 +478,21 @@ function renderResumePacketSummary(details: ResumePacketDetails): string {
 		"",
 		"## Exact Next Action",
 		packet.exactNextAction ?? "none recorded",
-		"",
-		"## Completed Work",
-		renderBulletList(packet.completedWork, 20),
-		"",
-		"## In-Flight Work",
-		renderBulletList(packet.inFlightWork, 20),
-		"",
-		"## Blockers",
-		renderBulletList(packet.blockers, 20),
-		"",
-		"## Constraints",
-		renderBulletList(packet.constraints, 20),
-		"",
-		"## Relevant Files",
-		renderBulletList(relevantFiles, 20),
-		"",
-		"## Artifacts",
-		renderArtifactList(packet.artifacts, 20),
-		"",
-		"## Open Questions",
-		renderBulletList(packet.openQuestions, 20),
-		"",
-		"## Facts",
-		renderBulletList(packet.facts, 20),
-		"",
-		"## Assumptions",
-		renderBulletList(packet.assumptions, 20),
-		"",
-		"## Avoid Repeating",
-		renderBulletList(packet.avoidRepeating, 20),
-	].join("\n");
+	];
+
+	appendOptionalSummarySection(lines, "Completed Work", packet.completedWork, 20);
+	appendOptionalSummarySection(lines, "In-Flight Work", packet.inFlightWork, 20);
+	appendOptionalSummarySection(lines, "Blockers", packet.blockers, 20);
+	appendOptionalSummarySection(lines, "Constraints", packet.constraints, 20);
+	appendOptionalSummarySection(lines, "Relevant Files", packet.relevantFiles, 20);
+	if (packet.artifacts.length > 0) {
+		lines.push("", "## Artifacts", renderArtifactList(packet.artifacts, 12));
+	}
+	appendOptionalSummarySection(lines, "Open Questions", packet.openQuestions, 20);
+	appendOptionalSummarySection(lines, "Facts", packet.facts, 20);
+	appendOptionalSummarySection(lines, "Assumptions", packet.assumptions, 20);
+	appendOptionalSummarySection(lines, "Avoid Repeating", packet.avoidRepeating, 20);
+	return lines.join("\n");
 }
 
 function loadLatestTaskState(branchEntries: SessionEntry[]): TaskState | null {
@@ -518,39 +542,63 @@ function mergeTaskState(base: TaskState | null, patch: TaskStatePatch, updatedBy
 	return next;
 }
 
-function buildFileLists(fileOps: {
-	read: Set<string>;
-	written: Set<string>;
-	edited: Set<string>;
-}): { readFiles: string[]; modifiedFiles: string[] } {
-	const modified = new Set<string>([...fileOps.written, ...fileOps.edited]);
-	const readFiles = [...fileOps.read].filter((path) => !modified.has(path)).sort();
-	const modifiedFiles = [...modified].sort();
-	return { readFiles, modifiedFiles };
+function mergeRelevantFilesIntoResumePacket(
+	resumePacket: ResumePacket,
+	fileOps?: { written: Set<string>; edited: Set<string> },
+): ResumePacket {
+	if (resumePacket.relevantFiles.length > 0) return resumePacket;
+	const modifiedFiles = fileOps ? [...new Set<string>([...fileOps.written, ...fileOps.edited])].sort() : [];
+	if (modifiedFiles.length === 0) return resumePacket;
+	return {
+		...resumePacket,
+		relevantFiles: normalizeStringList(modifiedFiles),
+	};
 }
 
-function renderFileTags(readFiles: string[], modifiedFiles: string[]): string {
-	const readBlock = readFiles.join("\n");
-	const modifiedBlock = modifiedFiles.join("\n");
-	return `<read-files>\n${readBlock}\n</read-files>\n\n<modified-files>\n${modifiedBlock}\n</modified-files>`;
+function projectResumePacketForPrompt(packet: ResumePacket): Record<string, unknown> {
+	return {
+		objective: packet.objective,
+		latestUserIntent: packet.latestUserIntent,
+		status: packet.status,
+		completionReason: packet.completionReason,
+		whyNotDone: packet.whyNotDone,
+		exactNextAction: packet.exactNextAction,
+		completedWork: packet.completedWork.slice(0, PROMPT_LIST_LIMIT),
+		inFlightWork: packet.inFlightWork.slice(0, PROMPT_LIST_LIMIT),
+		blockers: packet.blockers.slice(0, PROMPT_LIST_LIMIT),
+		constraints: packet.constraints.slice(0, PROMPT_LIST_LIMIT),
+		relevantFiles: packet.relevantFiles.slice(0, PROMPT_LIST_LIMIT),
+		artifacts: packet.artifacts.slice(0, PROMPT_LIST_LIMIT),
+		openQuestions: packet.openQuestions.slice(0, PROMPT_LIST_LIMIT),
+		facts: packet.facts.slice(0, PROMPT_LIST_LIMIT),
+		assumptions: packet.assumptions.slice(0, PROMPT_LIST_LIMIT),
+		avoidRepeating: packet.avoidRepeating.slice(0, PROMPT_LIST_LIMIT),
+	};
 }
 
 function buildCompactionPrompt(params: {
 	fullContextText: string;
 	previousResumePacket: ResumePacket | null;
+	latestSubstantiveUserIntent: string | null;
 	turnPrefixText?: string;
 	customInstructions?: string;
 	isSplitTurn: boolean;
 }): string {
 	const parts = [
-		"Generate a resume packet from the whole current session context below.",
-		"The context already includes prior compaction summaries and the latest live conversation.",
-		"Use the whole context to decide what matters, but keep only durable continuation state and exact operational details in the packet.",
+		"Generate a continuation resume packet from the current session context below.",
+		"This checkpoint should help another coding agent continue the next 1-3 turns after compaction.",
+		"Prefer newer explicit user instructions and corrections over older plans, prior summaries, synthetic control messages, and low-signal nudges like 'proceed' or 'continue'.",
+		"Keep only durable continuation state and exact operational details that still matter. Drop stale branches, superseded plans, exhaustive inventories, and history that no longer constrains the work.",
+		"Keep `relevantFiles` tight to the files needed for the active work. Keep `artifacts` only if still actionable, `openQuestions` only if unresolved and decision-relevant, and `assumptions` only if fragile and important.",
+		"Lists should usually be short. If a section has no important items, return an empty list instead of filler.",
 	];
 
+	if (params.latestSubstantiveUserIntent) {
+		parts.push(`Latest substantive user instruction (prefer this over filler nudges if there is any conflict):\n\n${params.latestSubstantiveUserIntent}`);
+	}
 	if (params.previousResumePacket) {
 		parts.push(
-			`Previous resume packet (supplemental only; newer context wins if there is any conflict):\n\n${JSON.stringify(params.previousResumePacket, null, 2)}`,
+			`Previous resume packet (supplemental only; newer context wins if there is any conflict):\n\n${JSON.stringify(projectResumePacketForPrompt(params.previousResumePacket), null, 2)}`,
 		);
 	}
 	if (params.customInstructions) {
@@ -703,9 +751,8 @@ export default function contextGuardian(pi: ExtensionAPI) {
 		if (!currentTaskState) {
 			persistTaskState(createBootstrapState(event.prompt), "bootstrap");
 		}
-		const injectedContext = renderResumePacketForPrompt(currentResumePacketDetails) || renderTaskStateForPrompt(currentTaskState);
 		return {
-			systemPrompt: `${event.systemPrompt}\n\n${injectedContext}`,
+			systemPrompt: `${event.systemPrompt}\n\n${renderTaskStateForPrompt(currentTaskState)}`,
 		};
 	});
 
@@ -756,18 +803,21 @@ export default function contextGuardian(pi: ExtensionAPI) {
 		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
 		if (!auth.ok || !auth.apiKey) return;
 
-		const fullContextText = serializeConversation(convertToLlm(buildSessionContext(event.branchEntries).messages));
-		const turnPrefixText = event.preparation.turnPrefixMessages.length
-			? serializeConversation(convertToLlm(event.preparation.turnPrefixMessages))
+		const filteredTurnPrefixMessages = filterCompactionMessages(event.preparation.turnPrefixMessages as ContextMessage[]);
+		const latestSubstantiveUserIntent = getLatestSubstantiveUserIntent(event.branchEntries, filteredTurnPrefixMessages);
+		const fullContextMessages = filterCompactionMessages(buildSessionContext(event.branchEntries).messages);
+		const fullContextText = serializeConversation(convertToLlm(fullContextMessages));
+		const turnPrefixText = filteredTurnPrefixMessages.length
+			? serializeConversation(convertToLlm(filteredTurnPrefixMessages))
 			: undefined;
 		const prompt = buildCompactionPrompt({
 			fullContextText,
 			previousResumePacket: currentResumePacketDetails?.resumePacket ?? null,
+			latestSubstantiveUserIntent,
 			turnPrefixText,
 			customInstructions: event.customInstructions,
 			isSplitTurn: event.preparation.isSplitTurn,
 		});
-		const { readFiles, modifiedFiles } = buildFileLists(event.preparation.fileOps);
 
 		try {
 			const response = await complete(
@@ -798,16 +848,21 @@ export default function contextGuardian(pi: ExtensionAPI) {
 
 			const parsed = parseJsonObject(responseText);
 			if (!parsed) return;
+			let resumePacket = normalizeResumePacket(parsed);
+			if (latestSubstantiveUserIntent) {
+				resumePacket.latestUserIntent = latestSubstantiveUserIntent;
+			} else if (!resumePacket.latestUserIntent || isLowSignalUserNudge(resumePacket.latestUserIntent)) {
+				resumePacket.latestUserIntent = currentResumePacketDetails?.resumePacket.latestUserIntent ?? resumePacket.latestUserIntent;
+			}
+			resumePacket = mergeRelevantFilesIntoResumePacket(resumePacket, event.preparation.fileOps);
 			const details: ResumePacketDetails = {
 				version: 1,
-				readFiles,
-				modifiedFiles,
-				resumePacket: normalizeResumePacket(parsed),
+				resumePacket,
 			};
 
 			return {
 				compaction: {
-					summary: `${renderResumePacketSummary(details)}\n\n${renderFileTags(readFiles, modifiedFiles)}`,
+					summary: renderResumePacketSummary(details),
 					firstKeptEntryId: event.preparation.firstKeptEntryId,
 					tokensBefore: event.preparation.tokensBefore,
 					details,
