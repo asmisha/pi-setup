@@ -87,7 +87,7 @@ If a finding cannot be mapped to a specific diff line, include it in the review 
 
 ### 4. Draft or validate the review text
 
-Before drafting, load `writing-voice` and `humor`.
+Before drafting, load `writing-voice`.
 
 Prefer a subagent drafting pass for:
 
@@ -97,13 +97,9 @@ Prefer a subagent drafting pass for:
 Recommended drafting pattern:
 
 - agent: `worker`
-- skills: `writing-voice`, `humor`
+- skills: `writing-voice`
 - model: `openai-codex/gpt-5.3-codex-spark`
 - input: frozen finding manifest, verified diff mappings, requested submission mode, and any user tone constraints
-
-Always generate the final joke through a **separate `humor` subagent** using `model: openai-codex/gpt-5.3-codex-spark`.
-
-Do not generate the joke in the main thread, and do not let the general drafting model invent the final joke text. The joke should always come from the dedicated `humor` subagent on `openai-codex/gpt-5.3-codex-spark`, then be checked for factual/tone fit before inclusion.
 
 Then do a final factual pass yourself against the manifest and diff mappings.
 
@@ -113,8 +109,6 @@ Review body rules:
 - keep the body short and high-signal
 - mention only the already-verified findings being submitted
 - for findings included in the body because they are not inlineable, cite the concrete file paths and/or function names so a reviewer can find them quickly
-- the last line must be a short joke grounded in the actual findings
-- the joke must be generated via a `humor` subagent using `openai-codex/gpt-5.3-codex-spark`
 
 Inline comment rules:
 
