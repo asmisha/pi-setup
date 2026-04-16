@@ -1,47 +1,39 @@
 ---
 name: linear
-description: Investigate Linear issues and documents through Pi's MCP proxy. Use when the user asks about a Linear issue URL/ID, issue details, project status, comments, or Linear documents.
+description: Investigate Linear issues and documents through Executor. Use when the user asks about a Linear issue URL/ID, issue details, project status, comments, or Linear documents.
 ---
 
-# Linear MCP Usage in Pi
+# Linear via Executor in Pi
 
-This Pi setup accesses Linear through the single `mcp` proxy tool, backed by `mcp-remote`.
+This Pi setup accesses Linear through Executor's `execute` tool, not the old `mcp` proxy.
 
-## Important Context Rules
+## Required setup
 
-- Do **not** expect first-class `linear_*` tools in Pi's normal tool list by default.
-- If the user provides a Linear URL/ID or asks about Linear issue/document state, query Linear via the `mcp` tool before answering. Do not answer from the URL slug, repo state, or guesswork alone.
-- Keep context small:
-  1. search tools first,
-  2. describe the selected tool if needed,
-  3. call only the specific tool you need.
-- `mcp.args` must be a **JSON string**, not an object.
+- Load the `executor-usage` skill before the first `execute` call.
+- If Linear is not configured in Executor yet, stop and tell the user to add the Linear MCP source in Executor and finish OAuth.
+- If the user provides a Linear URL/ID or asks about Linear issue/document state, query Linear through Executor before answering. Do not answer from the URL slug, repo state, or guesswork alone.
 
-## Auth Behavior
+## Discovery workflow
 
-- Linear auth is handled by `mcp-remote` with browser-based OAuth.
-- On first use, a browser may open for authorization.
-- If auth is required, tell the user to finish the browser flow and retry the same `mcp` call.
-- The verified Linear MCP endpoint configured in Pi is:
-  - `https://mcp.linear.app/mcp`
+Inside `execute`:
 
-## Server Name
+1. Search first:
+   - `const matches = await tools.search({ query: "linear issue document comment project", limit: 10 });`
+2. If the namespace is unclear, inspect configured sources:
+   - `await tools.executor.sources.list({})`
+3. Describe unfamiliar tools before calling them:
+   - `await tools.describe.tool({ path })`
+4. Call the selected tool through its full namespace path.
+   - If the source was added with namespace `linear`, calls will look like `tools.linear.<tool>(args)`.
+   - If the user kept Executor's auto-derived namespace, use the path returned by `tools.search(...)`.
 
-Always target server:
+## Auth behavior
 
-- `linear`
+- Executor handles OAuth and approval flows in its UI.
+- In Pi UI sessions, let `execute` handle the interaction inline.
+- In headless sessions, if execution pauses for auth or approval, report that clearly instead of guessing.
 
-## Discovery Workflow
-
-1. List/search Linear tools through `mcp`:
-   - `mcp({ server: "linear" })`
-   - `mcp({ search: "linear issue document comment project", server: "linear" })`
-2. If parameters are unclear, describe the tool:
-   - `mcp({ describe: "linear_<tool_name>" })`
-3. Call the selected tool:
-   - `mcp({ tool: "linear_<tool_name>", server: "linear", args: "{\"id\":\"...\"}" })`
-
-## Suggested Patterns
+## Suggested patterns
 
 ### Given a Linear issue ID or URL
 
@@ -70,7 +62,7 @@ Always target server:
 2. Describe it if the parameters are unclear
 3. Confirm destructive changes before overwriting content
 
-## Reporting Guidance
+## Reporting guidance
 
 When summarizing Linear findings, separate:
 
