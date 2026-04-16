@@ -38,13 +38,11 @@ Use this skill when the task is broad, ambiguous, or benefits from several isola
 
 ## Output requirements
 
-Use this structure:
-- `## Goal`
-- `## Method`
-- `## Findings`
-- `## Confidence`
-- `## Recommendations`
-- `## Next steps`
+Default to a compact synthesis:
+- Lead with the answer.
+- Use headings only for sections that change the decision.
+- Omit `Method`, `Confidence`, and `Next steps` unless the user asks or they change the decision.
+- For short analyses, use a short paragraph or bullet list.
 
 ## Reference
 

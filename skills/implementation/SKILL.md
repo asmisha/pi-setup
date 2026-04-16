@@ -27,7 +27,7 @@ Use this skill for code changes. Optimize for the simplest high-quality solution
      - at least one simpler alternative
      - whether the proposed change belongs in the current execution boundary
      - whether the change duplicates existing functionality or introduces a new path that existing code could cover
-   - Do not accept the requested implementation shape as fixed for new code paths; when the task is to update an existing file or document, preserve its structure and make the smallest in-place edit unless the user explicitly asked for a rewrite or approved a concrete restructuring need.
+   - Do not accept the requested implementation shape as fixed for new code paths; when updating existing code, preserve its structure and make the smallest in-place edit unless the user asked for a rewrite. Do not extract single-use helpers or wrappers unless they remove repeated logic.
    - If the chosen solution is not the simplest one, explain why the extra complexity is justified.
    - If that justification is weak, unverified, or based on assumptions, stop and revisit the plan before coding.
    - Prefer extending an existing mechanism over creating a parallel one unless you can verify that the existing mechanism is unsuitable.
@@ -53,13 +53,13 @@ Use this skill for code changes. Optimize for the simplest high-quality solution
    - Read before each edit.
    - Run targeted verification immediately after each step.
    - If something fails, fix the root cause with the smallest safe change.
-   - If the user corrects you, rejects part of the approach, or changes direction, stop following the old plan. Re-scope from the user's latest instruction and continue only with work that is still explicitly in scope. If the follow-up is a narrow mechanical correction, skip fresh planning/review subagents unless the change reopens design uncertainty or spans multiple files. If you believe broader follow-up work is necessary, explain why and ask first.
+   - If the user corrects you, rejects part of the approach, or changes direction, stop following the old plan. Re-scope from the user's latest instruction and continue only with work that is still explicitly in scope. A follow-up is not a narrow mechanical correction when it changes where behavior belongs, which existing abstraction should be reused, or whether a helper should exist. Re-check ownership and reuse before editing. If you believe broader follow-up work is necessary, explain why and ask first.
    - If implementation starts drifting toward a new mechanism or duplicated logic, pause and re-check whether an existing abstraction or execution path should be reused instead.
 
 6. **Do a focused final audit**
    - Run the relevant test/lint/type/build/syntax commands.
    - Review the diff for accidental edits, dead code, stale comments, and unused imports.
-   - For non-trivial diffs, run at least one focused review subagent before presenting results.
+   - For non-trivial diffs, run both `correctness-reviewer` and `simplicity-reviewer` before presenting results.
 
 ## Recommended subagent pattern
 
@@ -88,12 +88,11 @@ During planning, explicitly answer:
 
 ## Output requirements
 
-Use this structure in the final response:
-- `## Result`
-- `## Simplest approach chosen`
-- `## Files changed`
-- `## Verification` with `VERIFIED`, `LIKELY`, and `UNVERIFIED` labels
-- `## Remaining risks / follow-ups`
+Default to a compact final response:
+- Lead with the result.
+- Use headings only for non-empty sections such as `Files changed`, `Verification`, or `Remaining risks / follow-ups`.
+- Include `Verification` only if you ran checks or need to note missing verification.
+- For routine updates, use a short paragraph or up to 3 bullets; explain the approach only when the trade-off is non-obvious.
 
 ## Reference
 
