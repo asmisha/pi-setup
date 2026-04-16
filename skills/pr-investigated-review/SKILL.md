@@ -11,8 +11,8 @@ Use this skill for pull request review workflows that should run in a dedicated 
 
 1. Make sure the review happens in a non-main worktree (existing or newly created), not the user's main checkout.
 2. Review the PR against the merge base with the PR base branch.
-3. Run a first review pass where the four specialist reviewers review the PR broadly and verify candidate issues through focused issue-investigator subagents before returning confirmed findings.
-4. Create a grounded pass-1 handoff artifact and second-pass review brief, then run the same specialist reviewers again with the brief as guidance, not truth, while still requiring issue-investigator verification for candidate issues.
+3. Run a first review pass where the four core specialist reviewers, plus any additional scope-driven targeted reviewers you judge necessary, review the PR broadly and verify candidate issues through focused issue-investigator subagents before returning confirmed findings.
+4. Create a grounded pass-1 handoff artifact and second-pass review brief, then run the same core reviewers again plus any pass-2-specific targeted reviewers, with the brief as guidance, not truth, while still requiring issue-investigator verification for candidate issues.
 5. Synthesize pass-1 and pass-2 results carefully, while keeping review findings separate from the PR comment drafting step.
 
 ## Inputs to confirm early
@@ -85,14 +85,23 @@ Also write a short 2-5 bullet summary of what the change does based on the stat 
 
 ### 3. Run pass 1 as an investigated specialist review
 
-Do not load `code-review` directly for this skill. Reuse its four specialist reviewers, but require verification of each candidate issue before it becomes a finding.
+Do not load `code-review` directly for this skill. Reuse its four core specialist reviewers, expand with extra targeted reviewers when the PR scope warrants it, and require verification of each candidate issue before it becomes a finding.
 
-Spawn these four first-pass reviewers in parallel:
+Always include these four first-pass core reviewers in parallel:
 
 - `correctness-reviewer`
 - `security-reviewer`
 - `performance-reviewer`
 - `simplicity-reviewer`
+
+Before launching pass 1, make a scope-based coverage plan from the diff stat, changed-file list, and short summary:
+
+- decide whether to add **0–6** extra targeted reviewers, staying at **10 total broad review subagents max** for the pass
+- choose extra reviewers from the available subagent list only when they materially improve coverage for this PR
+- if a suitable named specialist does not exist, use `worker` with a sharply scoped specialty brief
+- optimize for distinct risk coverage, not redundant overlap; each extra reviewer must own a different investigation angle
+- common reasons to add extras include migrations/data integrity, API contracts, auth/permissions, frontend/accessibility, background jobs/concurrency, infra/observability, rollout/flags, or another clearly specialized domain surface
+- if the core four already cover the PR well, explicitly say no extra pass-1 reviewers are needed
 
 Give each first-pass reviewer:
 
@@ -101,22 +110,25 @@ Give each first-pass reviewer:
 - the short summary of the change
 - the working directory / cwd
 
+For each extra first-pass reviewer, explicitly say why that specialty was chosen and what non-overlapping risk surface it owns.
+
 Explicit instructions for each first-pass reviewer:
 
-- first, review the PR broadly within your specialty and identify candidate issues
+- first, review the PR within your assigned specialty and identify candidate issues
 - do not return a candidate issue as a finding until it has been investigated
 - whenever you identify a candidate issue, spawn a focused issue-investigator subagent in a **fresh** context to verify or falsify that one issue
 - if the environment does not already provide a dedicated `issue-investigator` agent, use `worker` and frame the task explicitly as focused issue investigation
 - each issue-investigator should receive only the minimum context needed: diff file path, relevant file paths/hunks, the concrete suspected issue, and the cwd
 - each issue-investigator must trace the relevant code path, verify or falsify the issue, and return concise evidence
 - do not forbid an issue-investigator from spawning its own focused subagents if that is the smallest reliable way to verify a detail
+- the **10-agent cap applies to the broad reviewer set for the pass**, not to these narrow issue-investigator helpers; still keep investigators minimal and only spawn them when needed
 - if you identify more than 10 plausible issues, investigate the highest-risk candidates first and return at most 10 confirmed issues total
 - after your investigations, return only confirmed issues, priority-ordered, with file/hunk evidence and impact
 - do not pad the list with speculative concerns just to reach the cap
 
 After pass 1, synthesize the reviewer issue lists into one first-pass result:
 
-- collect each reviewer's confirmed issue list
+- collect each core reviewer's and extra targeted reviewer's confirmed issue list
 - deduplicate only true duplicates (same file, same line or hunk, same underlying issue)
 - preserve distinct issues even if they came from the same area
 - order the synthesis by priority
@@ -173,13 +185,13 @@ Rules for the brief:
 - it must not invent new facts
 - it must not restate the entire first review
 - it should sharpen the second pass by identifying where deeper investigation is most likely to pay off
-- reviewer-specific guidance should tell the specialist reviewers what to look at, not what conclusion to reach
+- reviewer-specific guidance should tell the reviewers what to look at, not what conclusion to reach
 
 Prefer a `worker` subagent for this step unless the environment has a more specialized prompt-synthesis agent.
 
 ### 6. Run pass 2 with the brief as guidance, not truth
 
-Run the same four specialist reviewers again in parallel against the same diff file and same worktree.
+Run the same four core reviewers again in parallel against the same diff file and same worktree, then re-evaluate whether pass 2 needs the same extra reviewers, a different set of extra reviewers, or no extras at all. Stay at **10 total broad review subagents max** for the pass.
 
 Give each second-pass reviewer:
 
@@ -189,16 +201,20 @@ Give each second-pass reviewer:
 - the second-pass review brief path
 - the working directory / cwd
 
+For each extra pass-2 reviewer, explicitly say why that specialty is needed for the second pass and what non-overlapping risk surface it owns.
+
 Explicitly instruct them:
 
 - use the second-pass brief to focus your investigation, not to inherit conclusions
-- review broadly within your specialty again; do not just paraphrase pass 1
+- review within your assigned specialty again; do not just paraphrase pass 1
+- if you are an extra targeted reviewer, stay inside your assigned specialty instead of redoing a generic full review
 - re-verify any pass-1 finding before repeating it
 - whenever you identify a candidate issue, verify or falsify it through a focused issue-investigator subagent
 - if the environment does not already provide a dedicated `issue-investigator` agent, use `worker` and frame the task explicitly as focused issue investigation
 - each issue-investigator should receive only the minimum context needed: diff file path, relevant file paths/hunks, the concrete suspected issue, and the cwd
 - each issue-investigator must trace the relevant code path, verify or falsify the issue, and return concise evidence
 - do not forbid an issue-investigator from spawning its own focused subagents if that is the smallest reliable way to verify a detail
+- the **10-agent cap applies to the broad reviewer set for the pass**, not to these narrow issue-investigator helpers; still keep investigators minimal and only spawn them when needed
 - look for deeper, cross-file, architectural, or business-logic issues that were easier to miss on pass 1
 - call out when a pass-1 suspicion does not hold up after re-checking
 - return only evidence-backed findings, priority-ordered, with at most 10 confirmed issues total

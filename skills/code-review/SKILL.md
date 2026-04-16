@@ -26,11 +26,27 @@ Use this skill when the goal is to find real problems in code changes, not to ru
 
 ### 2. Delegate to specialist reviewers immediately
 
-Spawn **all four** in a single parallel subagent call:
+Always include these **four core reviewers** in a single parallel subagent call:
 - `correctness-reviewer`
 - `security-reviewer`
 - `performance-reviewer`
 - `simplicity-reviewer`
+
+Before you launch reviewers, make a fast coverage plan from only the diff stat, changed-file list, and your 2–5 bullet summary:
+- Decide whether this review also needs **0–6 additional targeted reviewers**, staying at **10 total broad review subagents max**.
+- Choose extra reviewers from the available subagent list only when they materially improve coverage for this specific change.
+- Optimize for distinct risk coverage, not redundant overlap. Each extra reviewer must own a different investigation angle.
+- If a suitable named specialist is not available, use `worker` with a sharply scoped specialty brief instead of skipping that risk area.
+- If the change is narrow and the core four already cover it well, explicitly say no extra reviewers are needed.
+
+Common triggers for extra reviewers include:
+- database migrations, data backfills, transactions, caching, or data model changes
+- API contracts, schemas, generated clients, SDKs, or serialization boundaries
+- auth, RBAC, tenancy, secrets, or permissions logic
+- UI flows, forms, state management, or accessibility-sensitive changes
+- background jobs, queues, concurrency, retries, or idempotency
+- infra, deploy, observability, feature flags, config, or operational workflows
+- domain-specific surfaces where a narrower specialist would catch more than another generic pass
 
 Give each subagent:
 - The path to the diff file on disk (e.g., `/tmp/branch-review.diff`)
@@ -38,15 +54,17 @@ Give each subagent:
 - A brief summary of the change (2–5 bullets)
 - The working directory / cwd
 
+For each extra reviewer, explicitly say why it was chosen and what non-overlapping risk surface it owns.
+
 **Do NOT** include diff content, file contents, or your own analysis in the task text.
-**Do NOT** use the generic `reviewer` agent — the four specialists cover everything.
+**Do NOT** use the generic `reviewer` agent as a redundant broad pass or as a substitute for the core four. Extra reviewers must be narrowly targeted specialists.
 - In each subagent task, explicitly require a concise final answer that the orchestrator can synthesize directly: priority, file/line, issue, impact.
 - If a reviewer expects a long output or risks truncation, have it write the full findings to a temp file and return a short summary plus the file path in the same first pass.
 - If one reviewer response comes back truncated or incomplete, recover that reviewer’s findings from its returned temp-file path instead of launching a second broad review pass or re-reviewing the diff yourself.
 
 ### 3. Synthesize without losing issues
 
-- Merge findings from all four reviewers.
+- Merge findings from the core reviewers and any extra targeted reviewers you launched.
 - Deduplicate only true duplicates (same file, same line, same issue).
 - Preserve distinct issues even if there are many.
 - Order everything by priority.
@@ -65,9 +83,9 @@ Give each subagent:
 
 ## Token efficiency rules
 
-- The orchestrator should make **≤ 5 tool calls** before spawning subagents: get diff stat, save diff to file, get file list, spawn subagents.
+- The orchestrator should make **≤ 6 tool calls** before spawning broad reviewers: get diff stat, save diff to file, get file list, optionally list available agents once, then spawn reviewers.
 - Do not pre-read files the subagents will read. Subagents have their own context windows.
-- Do not embed large content in subagent task descriptions. Pass file paths.
+- Do not embed large content in subagent task descriptions. Pass file paths plus only the short summary and targeted scope rationale.
 
 ## Severity scale
 

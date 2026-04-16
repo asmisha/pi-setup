@@ -71,15 +71,19 @@ Write a short 2-5 bullet summary of what the change does based on the stat and f
 Reuse the normal PR review structure:
 
 - use the prepared worktree and merge-base diff
-- use the same four specialist reviewers that `code-review` uses:
+- always include the same four core reviewers that `code-review` uses:
   - `correctness-reviewer`
   - `security-reviewer`
   - `performance-reviewer`
   - `simplicity-reviewer`
+- before launching pass 1, make a scope-based coverage plan and decide whether to add **0–6** extra targeted reviewers, staying at **10 total broad review subagents max** for the pass
+- choose extra reviewers from the available subagent list only when they materially improve coverage for this PR; if a needed specialty is unavailable, use `worker` with a sharply scoped specialty brief
+- optimize for distinct risk coverage, not duplicate broad passes; each extra reviewer must own a different investigation angle
+- common reasons to add extras include migrations/data integrity, API contracts, auth/permissions, frontend/accessibility, background jobs/concurrency, infra/observability, rollout/flags, or another clear domain-specific surface
 - keep the review evidence-backed and priority-ordered
 - do not run tests, builds, or linters unless the user separately asks for verification
 
-Treat this as the baseline PR review pass. The reviewers should investigate the changes normally, with no special second-pass guidance yet.
+Treat this as the baseline PR review pass. The reviewers should investigate the changes normally, with no special second-pass guidance yet. If the core four are already sufficient, explicitly say no extra pass-1 reviewers were needed.
 
 After synthesizing the first-pass findings, do **not** stop for user discussion yet. In this skill, the pause happens only after both review cycles are complete.
 
@@ -137,13 +141,13 @@ Rules for the brief:
 - It must not invent new facts.
 - It must not restate the entire first review.
 - It should sharpen the second pass by identifying where deeper investigation is most likely to pay off.
-- Reviewer-specific guidance should tell the specialist reviewers what to look at, not what conclusion to reach.
+- Reviewer-specific guidance should tell the reviewers what to look at, not what conclusion to reach.
 
 Prefer a `worker` subagent for this step unless the environment has a more specialized prompt-synthesis agent.
 
 ### 6. Run the second review cycle with the brief as guidance, not truth
 
-Run the same four specialist reviewers again in parallel against the same diff file and same worktree.
+Run the same four core reviewers again in parallel against the same diff file and same worktree. Then re-evaluate whether pass 2 needs the same extra reviewers, a different set of extra reviewers, or no extras at all; stay at **10 total broad review subagents max** for the pass.
 
 Give each reviewer:
 
@@ -153,9 +157,12 @@ Give each reviewer:
 - the second-pass review brief path
 - the working directory / cwd
 
+For each extra pass-2 reviewer, explicitly say why that specialty is needed for the second pass and what non-overlapping risk surface it owns.
+
 Explicitly instruct them:
 
 - use the second-pass brief to focus your investigation, not to inherit conclusions
+- if you are an extra targeted reviewer, stay inside your assigned specialty instead of redoing a generic full review
 - re-verify any pass-1 finding before repeating it
 - look for deeper, cross-file, architectural, business-logic, or maintainability issues that were easier to miss on the first pass
 - call out when a pass-1 suspicion does not hold up after re-checking

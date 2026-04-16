@@ -19,11 +19,13 @@ Use this skill when the main artifact is a document, but the review must stay gr
 
 3. **Run specialist passes**
    - Use `scout` for codebase mapping if the surface area is large.
-   - Run focused reviewers in parallel as needed:
-     - `spec-reviewer`
-     - `security-reviewer`
-     - `performance-reviewer`
-     - `simplicity-reviewer`
+   - Always include `spec-reviewer`.
+   - Then make an explicit coverage plan for the document's actual scope and decide which other reviewers to launch.
+   - Add `security-reviewer`, `performance-reviewer`, `simplicity-reviewer`, and/or other targeted reviewers only when they materially improve coverage for this spec.
+   - You may launch up to **10 total review subagents**. Keep the set small when the spec is narrow, and expand it when the surface area genuinely warrants it.
+   - Choose extra reviewers from the available subagent list when possible; if a needed specialty does not exist, use `worker` with a sharply scoped specialty brief.
+   - Optimize for distinct risk coverage, not redundant overlap. Each extra reviewer must own a different investigation angle.
+   - Common reasons to add extras include migrations/data model changes, API contracts, rollout/migration plans, observability, infra/operations, privacy/compliance, UX/accessibility, background jobs/concurrency, or a domain-specific boundary the base reviewers may miss.
 
 4. **Compare document vs reality**
    - Flag contradictions with current code.
