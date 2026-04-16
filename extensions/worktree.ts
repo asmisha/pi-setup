@@ -80,6 +80,7 @@ type WorktreeCreateFlag = "--shared" | "--isolated";
 type WorktreeTargetKind = "auto" | "branch";
 type ResolvedWorktreeTarget = Omit<WorktreeState, "worktreePath">;
 type CommandRunResult = { ok: boolean; output: string; stdout: string; stderr: string; aborted: boolean; timedOut: boolean };
+type WorktreeSwitchOutcome = { kind: "cancelled" } | { kind: "failed" } | { kind: "switched"; setupNote: string | null };
 
 type EnsuredWorktreeResult =
 	| { kind: "cancelled" }
@@ -834,7 +835,7 @@ async function runCommandWithLoader(
 	);
 }
 
-async function runSetupIfPresent(ctx: ExtensionContext, worktreePath: string, label: string): Promise<string | null> {
+async function runSetupIfPresent(ctx: ExtensionContext, worktreePath: string, label: string, signal?: AbortSignal): Promise<string | null> {
 	try {
 		const conductorScripts = readConductorScripts(worktreePath);
 		if (!conductorScripts?.setup) return null;
@@ -844,6 +845,7 @@ async function runSetupIfPresent(ctx: ExtensionContext, worktreePath: string, la
 			`Running setup for ${label}...`,
 			conductorScripts.setup,
 			worktreePath,
+			signal,
 		);
 		if (!setupResult) return "Setup cancelled";
 		if (!setupResult.ok) return `Setup failed:\n${setupResult.output}`;
@@ -883,7 +885,7 @@ function stopPrMetadataRefresh() {
 async function refreshCurrentPrMetadata(ctx: ExtensionContext): Promise<void> {
 	if (prMetadataRefreshInFlight) return;
 	const state = currentState;
-	if (!state?.prNumber && !state?.prUrl) return;
+	if (!state || state.branch.startsWith("(")) return;
 
 	prMetadataRefreshInFlight = true;
 	const abortController = new AbortController();
@@ -910,7 +912,7 @@ async function refreshCurrentPrMetadata(ctx: ExtensionContext): Promise<void> {
 
 function syncPrMetadataRefresh(ctx: ExtensionContext) {
 	stopPrMetadataRefresh();
-	if (!currentState?.prNumber && !currentState?.prUrl) return;
+	if (!currentState || currentState.branch.startsWith("(")) return;
 	prMetadataRefreshTimer = setInterval(() => {
 		void refreshCurrentPrMetadata(ctx);
 	}, PR_METADATA_REFRESH_INTERVAL_MS);
@@ -923,29 +925,38 @@ function restoreSessionWorktreeState(ctx: ExtensionContext) {
 	updateStatus(ctx);
 }
 
-async function switchToMainWorktree(ctx: ExtensionContext, mainRoot: string, mainBranch: string): Promise<void> {
+async function switchToMainWorktree(ctx: ExtensionContext, mainRoot: string, mainBranch: string, signal?: AbortSignal): Promise<WorktreeSwitchOutcome> {
+	if (signal?.aborted) {
+		ctx.ui.notify("Switch cancelled.", "info");
+		return { kind: "cancelled" };
+	}
 	try {
 		process.chdir(mainRoot);
 	} catch (e: any) {
 		ctx.ui.notify(`Failed to chdir: ${e.message}`, "error");
-		return;
+		return { kind: "failed" };
 	}
 
 	currentState = null;
 	syncPrMetadataRefresh(ctx);
 	updateStatus(ctx);
-	const setupNote = await runSetupIfPresent(ctx, mainRoot, mainBranch);
+	const setupNote = await runSetupIfPresent(ctx, mainRoot, mainBranch, signal);
 	const parts = [`Switched to main worktree: ${mainRoot}`];
 	if (setupNote) parts.push(setupNote);
 	ctx.ui.notify(parts.join("\n"), setupNote === "Setup cancelled" ? "info" : setupNote && setupNote !== "Setup completed" ? "warning" : "success");
+	return { kind: "switched", setupNote };
 }
 
-async function switchToExistingWorktree(ctx: ExtensionContext, nextState: WorktreeState, signal?: AbortSignal): Promise<void> {
+async function switchToExistingWorktree(ctx: ExtensionContext, nextState: WorktreeState, signal?: AbortSignal): Promise<WorktreeSwitchOutcome> {
+	if (signal?.aborted) {
+		ctx.ui.notify("Switch cancelled.", "info");
+		return { kind: "cancelled" };
+	}
 	try {
 		process.chdir(nextState.worktreePath);
 	} catch (e: any) {
 		ctx.ui.notify(`Failed to chdir: ${e.message}`, "error");
-		return;
+		return { kind: "failed" };
 	}
 
 	let { prNumber, prUrl, prState, prChecksStatus, prIsDraft, prReviewDecision, prMergeStateStatus } = nextState;
@@ -976,13 +987,17 @@ async function switchToExistingWorktree(ctx: ExtensionContext, nextState: Worktr
 
 	syncPrMetadataRefresh(ctx);
 	updateStatus(ctx);
+	if (!prNumber && !nextState.branch.startsWith("(")) {
+		void refreshCurrentPrMetadata(ctx);
+	}
 
-	const setupNote = await runSetupIfPresent(ctx, nextState.worktreePath, nextState.branch);
+	const setupNote = await runSetupIfPresent(ctx, nextState.worktreePath, nextState.branch, signal);
 
 	const parts = [`Switched to worktree: ${nextState.worktreePath}`, `Branch: ${nextState.branch}`];
 	if (prUrl) parts.push(`PR: ${prUrl}`);
 	if (setupNote) parts.push(setupNote);
 	ctx.ui.notify(parts.join("\n"), setupNote === "Setup cancelled" ? "info" : setupNote && setupNote !== "Setup completed" ? "warning" : "success");
+	return { kind: "switched", setupNote };
 }
 
 async function showWorktreeSelector(ctx: ExtensionContext): Promise<WorktreeListItem | null> {
@@ -1264,11 +1279,11 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "worktree_create",
 		label: "Worktree Create",
-		description: "Create or reuse a git worktree from a branch name, PR number, or GitHub PR URL.",
-		promptSnippet: "Create or reuse a git worktree for a branch, PR number, or PR URL and return its path.",
+		description: "Create or reuse a git worktree from a branch name, PR number, or GitHub PR URL, and optionally switch the current session into it.",
+		promptSnippet: "Create or reuse a git worktree for a branch, PR number, or PR URL and optionally switch the current session into it.",
 		promptGuidelines: [
 			"Use this instead of shelling out to git worktree when you want the worktree extension's PR resolution and reuse behavior.",
-			"Use the returned worktreePath for follow-up work; this tool does not switch the active Pi session.",
+			"Set switchTo to true when you want the current Pi session cwd to move into the resolved worktree.",
 			"Set targetKind to branch when target should be interpreted literally as a branch name instead of a PR reference or the main-worktree alias.",
 		],
 		parameters: Type.Object({
@@ -1279,6 +1294,7 @@ export default function (pi: ExtensionAPI) {
 					Type.Literal("branch"),
 				], { description: "How to interpret target. Use branch to force target to be treated as a branch name. Defaults to auto." }),
 			),
+			switchTo: Type.Optional(Type.Boolean({ description: "When true, switch the current Pi session into the resolved worktree/main checkout. Defaults to false." })),
 		}),
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			const target = params.target.trim();
@@ -1287,59 +1303,164 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const targetKind = params.targetKind === "branch" ? "branch" : "auto";
-			const details = { target, targetKind };
+			const switchTo = params.switchTo === true;
+			const details = { target, targetKind, switchTo };
+			const creationCancelledResponse = {
+				content: [{ type: "text", text: "Worktree creation cancelled." }],
+				details: { ...details, cancelled: true, switchStatus: "not-started" },
+			};
+			const getSetupStatus = (setupNote: string | null) => (
+				setupNote === "Setup completed"
+					? "completed"
+					: setupNote === "Setup cancelled"
+						? "cancelled"
+						: setupNote
+							? "failed"
+							: "not-run"
+			);
 			if (target === "main" && targetKind !== "branch") {
-				if (signal?.aborted) {
-					return {
-						content: [{ type: "text", text: "Worktree creation cancelled." }],
-						details: { ...details, cancelled: true },
-					};
-				}
+				if (signal?.aborted) return creationCancelledResponse;
 				const mainRoot = getMainWorktreeRoot();
 				const mainBranch = getMainBranch(mainRoot);
+				let setupNote: string | null = null;
+				let switchedCurrentSession = false;
+				let switchStatus = switchTo ? "completed" : "not-requested";
+				if (switchTo) {
+					const switchOutcome = await switchToMainWorktree(ctx, mainRoot, mainBranch, signal);
+					if (switchOutcome.kind === "cancelled") {
+						return {
+							content: [{ type: "text", text: `Main worktree: ${mainRoot}
+Switch cancelled before changing the current session.` }],
+							details: {
+								...details,
+								branch: mainBranch,
+								worktreePath: mainRoot,
+								switchedCurrentSession: false,
+								setupNote: null,
+								setupStatus: "not-run",
+								switchStatus: "cancelled",
+							},
+						};
+					}
+					if (switchOutcome.kind === "failed") throw new Error(`Failed to switch current session to ${mainRoot}`);
+					setupNote = switchOutcome.setupNote;
+					switchedCurrentSession = true;
+				}
+				const lines = [`${switchedCurrentSession ? "Switched to main worktree" : "Main worktree"}: ${mainRoot}`];
+				if (setupNote) lines.push(setupNote);
 				return {
-					content: [{ type: "text", text: `Main worktree: ${mainRoot}` }],
+					content: [{ type: "text", text: lines.join("\n") }],
 					details: {
 						...details,
 						branch: mainBranch,
 						worktreePath: mainRoot,
+						switchedCurrentSession,
+						setupNote,
+						setupStatus: getSetupStatus(setupNote),
+						switchStatus,
 					},
 				};
 			}
 			const result = await ensureWorktree(ctx, target, [], signal, targetKind);
-			if (result.kind === "cancelled") {
-				return {
-					content: [{ type: "text", text: "Worktree creation cancelled." }],
-					details: { ...details, cancelled: true },
-				};
-			}
+			if (result.kind === "cancelled") return creationCancelledResponse;
 
 			if (result.kind === "main") {
+				let setupNote: string | null = null;
+				let switchedCurrentSession = false;
+				let switchStatus = switchTo ? "completed" : "not-requested";
+				if (switchTo) {
+					const switchOutcome = await switchToMainWorktree(ctx, result.mainRoot, result.mainBranch, signal);
+					if (switchOutcome.kind === "cancelled") {
+						return {
+							content: [{ type: "text", text: `Main worktree: ${result.mainRoot}
+Switch cancelled before changing the current session.` }],
+							details: {
+								...details,
+								branch: result.mainBranch,
+								worktreePath: result.mainRoot,
+								switchedCurrentSession: false,
+								setupNote: null,
+								setupStatus: "not-run",
+								switchStatus: "cancelled",
+							},
+						};
+					}
+					if (switchOutcome.kind === "failed") throw new Error(`Failed to switch current session to ${result.mainRoot}`);
+					setupNote = switchOutcome.setupNote;
+					switchedCurrentSession = true;
+				}
+				const lines = [`${switchedCurrentSession ? "Switched to main worktree" : "Main worktree"}: ${result.mainRoot}`];
+				if (setupNote) lines.push(setupNote);
 				return {
-					content: [{ type: "text", text: `Main worktree: ${result.mainRoot}` }],
+					content: [{ type: "text", text: lines.join("\n") }],
 					details: {
 						...details,
 						branch: result.mainBranch,
 						worktreePath: result.mainRoot,
+						switchedCurrentSession,
+						setupNote,
+						setupStatus: getSetupStatus(setupNote),
+						switchStatus,
 					},
 				};
 			}
 
+			let setupNote: string | null = null;
+			let switchedCurrentSession = false;
+			let switchStatus = switchTo ? "completed" : "not-requested";
+			if (switchTo) {
+				const switchOutcome = await switchToExistingWorktree(ctx, result.state, signal);
+				if (switchOutcome.kind === "cancelled") {
+					const lines = [
+						`${result.created ? "Created" : "Reused"} worktree: ${result.state.worktreePath}`,
+						`Branch: ${result.state.branch}`,
+						"Switch cancelled before changing the current session.",
+					];
+					if (result.state.prUrl) lines.push(`PR: ${result.state.prUrl}`);
+					return {
+						content: [{ type: "text", text: lines.join("\n") }],
+						details: {
+							...details,
+							branch: result.state.branch,
+							worktreePath: result.state.worktreePath,
+							prNumber: result.state.prNumber,
+							prUrl: result.state.prUrl,
+							created: result.created,
+							switchedCurrentSession: false,
+							setupNote: null,
+							setupStatus: "not-run",
+							switchStatus: "cancelled",
+						},
+					};
+				}
+				if (switchOutcome.kind === "failed") throw new Error(`Failed to switch current session to ${result.state.worktreePath}`);
+				setupNote = switchOutcome.setupNote;
+				switchedCurrentSession = true;
+			}
+
+			const responseState = switchedCurrentSession && currentState?.worktreePath === result.state.worktreePath
+				? currentState
+				: result.state;
 			const lines = [
-				`${result.created ? "Created" : "Reused"} worktree: ${result.state.worktreePath}`,
-				`Branch: ${result.state.branch}`,
+				`${switchedCurrentSession ? `${result.created ? "Created" : "Reused"} and switched to worktree` : `${result.created ? "Created" : "Reused"} worktree`}: ${responseState.worktreePath}`,
+				`Branch: ${responseState.branch}`,
 			];
-			if (result.state.prUrl) lines.push(`PR: ${result.state.prUrl}`);
+			if (responseState.prUrl) lines.push(`PR: ${responseState.prUrl}`);
+			if (setupNote) lines.push(setupNote);
 
 			return {
 				content: [{ type: "text", text: lines.join("\n") }],
 				details: {
 					...details,
-					branch: result.state.branch,
-					worktreePath: result.state.worktreePath,
-					prNumber: result.state.prNumber,
-					prUrl: result.state.prUrl,
+					branch: responseState.branch,
+					worktreePath: responseState.worktreePath,
+					prNumber: responseState.prNumber,
+					prUrl: responseState.prUrl,
 					created: result.created,
+					switchedCurrentSession,
+					setupNote,
+					setupStatus: getSetupStatus(setupNote),
+					switchStatus,
 				},
 			};
 		},
@@ -1378,7 +1499,7 @@ export default function (pi: ExtensionAPI) {
 			if (!selected) return;
 
 			if (selected.isMain) {
-				await switchToMainWorktree(ctx, selected.worktreePath, selected.branch);
+				await switchToMainWorktree(ctx, selected.worktreePath, selected.branch, ctx.signal);
 				return;
 			}
 
@@ -1531,7 +1652,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			if (worktreeResult.kind === "main") {
-				await switchToMainWorktree(ctx, worktreeResult.mainRoot, worktreeResult.mainBranch);
+				await switchToMainWorktree(ctx, worktreeResult.mainRoot, worktreeResult.mainBranch, ctx.signal);
 				return;
 			}
 

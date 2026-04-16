@@ -60,6 +60,7 @@ Verified parameters from `extensions/worktree.ts`:
 
 - `target` — branch name, PR number, or GitHub PR URL
 - `targetKind` — optional; defaults to `auto`, or use `branch` to force the target to be treated as a branch name instead of PR input or the `main` alias
+- `switchTo` — optional; defaults to `false`, or use `true` to switch the current Pi session into the resolved worktree/main checkout
 
 Verified behavior:
 
@@ -67,14 +68,15 @@ Verified behavior:
 - reuses the candidate worktree directory when it is already a valid worktree for the same repo and branch
 - creates a new worktree when needed
 - returns the resolved `worktreePath` to the agent
-- does not switch the current Pi session; session switching remains in `/worktree`
-- accepts `target: "main"` as an alias for the current main-worktree branch and returns the main worktree path without switching the session
+- leaves the current Pi session where it is by default
+- switches the current Pi session and cwd when `switchTo: true`
+- accepts `target: "main"` as an alias for the current main-worktree branch and returns or switches to the main worktree path
 
 ## How worktree creation works
 
 Verified behavior:
 
-- If a worktree already exists for the branch, the extension switches to it
+- If a worktree already exists for the branch, the extension reuses it
 - If a matching candidate directory already exists and belongs to the same repo/worktree setup, it reuses it
 - Otherwise it creates a new worktree
 - If `alto` is available, it runs:
