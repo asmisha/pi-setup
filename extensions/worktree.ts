@@ -3,6 +3,7 @@
  *
  * Accepts a branch name, PR number, or PR URL.
  * Creates (or reuses) a git worktree and can switch pi's working directory into it.
+ * When running inside Herdr, switches hand off to a new Herdr tab with a fresh Pi process rooted at the target worktree.
  *
  * If `alto` CLI is available, delegates to `alto worktree new <branch> --print-path`;
  * otherwise falls back to plain `git worktree add`.
@@ -20,8 +21,10 @@ import { BorderedLoader } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { Container, type SelectItem, SelectList, Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { execSync, spawn as nodeSpawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join, resolve } from "node:path";
 
 type PrChecksStatus = "passing" | "failing" | "pending" | null;
 type PrReviewDecision = "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
@@ -80,7 +83,21 @@ type WorktreeCreateFlag = "--shared" | "--isolated";
 type WorktreeTargetKind = "auto" | "branch";
 type ResolvedWorktreeTarget = Omit<WorktreeState, "worktreePath">;
 type CommandRunResult = { ok: boolean; output: string; stdout: string; stderr: string; aborted: boolean; timedOut: boolean };
-type WorktreeSwitchOutcome = { kind: "cancelled" } | { kind: "failed" } | { kind: "switched"; setupNote: string | null };
+type WorktreeSwitchOutcome =
+	| { kind: "cancelled" }
+	| { kind: "failed"; error: string }
+	| { kind: "switched"; setupNote: string | null }
+	| { kind: "handed-off"; state: WorktreeState; setupNote: string | null; tabId: string; paneId: string; sessionForked: boolean };
+
+type HerdrLaunchResult =
+	| { cancelled: true }
+	| {
+		cancelled: false;
+		tabId: string;
+		paneId: string;
+		sessionForked: boolean;
+		setupNote: string | null;
+	};
 
 type EnsuredWorktreeResult =
 	| { kind: "cancelled" }
@@ -94,6 +111,8 @@ type EnsuredWorktreeResult =
 /** The cwd when pi started — used to detect drift and patch system prompt. */
 const originalCwd = process.cwd();
 const PR_METADATA_REFRESH_INTERVAL_MS = 60_000;
+const HERDR_HANDOFF_POLL_INTERVAL_MS = 250;
+const HERDR_HANDOFF_MESSAGE_TYPE = "worktree-herdr-handoff";
 
 let currentState: WorktreeState | null = null;
 let prMetadataRefreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -591,6 +610,214 @@ function readConductorScripts(worktreePath: string): ConductorScripts | null {
 	};
 }
 
+function getSetupCommand(worktreePath: string): string | null {
+	return readConductorScripts(worktreePath)?.setup ?? null;
+}
+
+function readTextFileIfExists(path: string): string | null {
+	return existsSync(path) ? readFileSync(path, "utf-8") : null;
+}
+
+function createForkSessionSnapshot(ctx: ExtensionContext): string | null {
+	const header = ctx.sessionManager.getHeader();
+	if (!header) return null;
+	const entries = ctx.sessionManager.getEntries();
+	const snapshotPath = join(tmpdir(), `pi-worktree-herdr-${randomUUID()}.session.jsonl`);
+	writeFileSync(snapshotPath, `${[header, ...entries].map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+	return snapshotPath;
+}
+
+function createTempTextFile(suffix: string, content: string): string {
+	const path = join(tmpdir(), `pi-worktree-herdr-${randomUUID()}${suffix}`);
+	writeFileSync(path, content);
+	return path;
+}
+
+function cleanupTempFiles(...paths: string[]): void {
+	for (const path of paths) {
+		try {
+			rmSync(path, { force: true });
+		} catch {
+			// Best-effort temp cleanup only.
+		}
+	}
+}
+
+async function waitForHerdrHandoffStatus(statusFile: string, signal?: AbortSignal): Promise<string | null> {
+	while (true) {
+		if (signal?.aborted) return null;
+		const status = readTextFileIfExists(statusFile)?.trim();
+		if (status) return status;
+		await new Promise((resolve) => setTimeout(resolve, HERDR_HANDOFF_POLL_INTERVAL_MS));
+	}
+}
+
+function shellQuote(value: string): string {
+	return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+function hasHerdrCli(): boolean {
+	try {
+		execSync("command -v herdr", {
+			encoding: "utf-8",
+			timeout: 3_000,
+			stdio: ["ignore", "ignore", "ignore"],
+		});
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+function shouldUseHerdrHandoff(): boolean {
+	return process.env.HERDR_ENV === "1" && hasHerdrCli();
+}
+
+function buildHerdrTabLabel(branch: string, prNumber: number | null): string {
+	const base = prNumber ? `pr-${prNumber}` : branch;
+	return base.length <= 48 ? base : `${base.slice(0, 45)}...`;
+}
+
+function buildHerdrContinuationPrompt(target: Pick<WorktreeState, "worktreePath" | "branch" | "prUrl">, sessionForked: boolean): string {
+	const lines = [
+		"Continue the current task from this worktree.",
+		"You were launched automatically after a worktree switch handoff.",
+		`Worktree: ${target.worktreePath}`,
+		`Branch: ${target.branch}`,
+	];
+	if (target.prUrl) lines.push(`PR: ${target.prUrl}`);
+	lines.push(
+		sessionForked
+			? "Resume from the forked session context and continue working here. Do not restart from scratch."
+			: "The previous Pi session could not be forked, so no session history was transferred. Continue here and ask the user to restate anything important that is missing.",
+	);
+	return lines.join("\n");
+}
+
+async function getCurrentHerdrWorkspaceId(signal?: AbortSignal): Promise<string | null> {
+	const paneId = process.env.HERDR_PANE_ID?.trim();
+	if (!paneId) return null;
+
+	const result = await runCommandAsync(`herdr pane get ${shellQuote(paneId)}`, {
+		signal,
+		timeoutMs: 10_000,
+	});
+	if (!result.ok || result.aborted) return null;
+
+	try {
+		const payload = JSON.parse(result.stdout.trim()) as { result?: { pane?: { workspace_id?: unknown } } };
+		return typeof payload.result?.pane?.workspace_id === "string" ? payload.result.pane.workspace_id : null;
+	} catch {
+		return null;
+	}
+}
+
+async function launchPiInHerdrTab(
+	ctx: ExtensionContext,
+	target: Pick<WorktreeState, "worktreePath" | "branch" | "prNumber" | "prUrl">,
+	signal?: AbortSignal,
+): Promise<HerdrLaunchResult> {
+	if (signal?.aborted) return { cancelled: true };
+	const setupCommand = getSetupCommand(target.worktreePath);
+	const workspaceId = await getCurrentHerdrWorkspaceId(signal);
+	const createCommand = `herdr tab create${workspaceId ? ` --workspace ${shellQuote(workspaceId)}` : ""} --cwd ${shellQuote(target.worktreePath)} --label ${shellQuote(buildHerdrTabLabel(target.branch, target.prNumber))}`;
+	const createResult = await runCommandAsync(createCommand, {
+		signal,
+		timeoutMs: 15_000,
+	});
+	if (createResult.aborted) return { cancelled: true };
+	if (!createResult.ok) throw new Error(`Failed to create Herdr tab:\n${createResult.output}`);
+
+	let tabId: string;
+	let paneId: string;
+	try {
+		const payload = JSON.parse(createResult.stdout.trim()) as {
+			result?: {
+				tab?: { tab_id?: unknown };
+				root_pane?: { pane_id?: unknown };
+			};
+		};
+		tabId = typeof payload.result?.tab?.tab_id === "string" ? payload.result.tab.tab_id : "";
+		paneId = typeof payload.result?.root_pane?.pane_id === "string" ? payload.result.root_pane.pane_id : "";
+	} catch {
+		tabId = "";
+		paneId = "";
+	}
+	if (!tabId || !paneId) {
+		throw new Error(`Unexpected response from herdr tab create:\n${createResult.stdout.trim() || createResult.output}`);
+	}
+
+	const forkSessionFile = createForkSessionSnapshot(ctx);
+	const sessionForked = typeof forkSessionFile === "string" && forkSessionFile.length > 0 && existsSync(forkSessionFile);
+	const promptFile = createTempTextFile(".prompt.txt", buildHerdrContinuationPrompt(target, sessionForked));
+	const piCommand = sessionForked
+		? `pi --fork ${shellQuote(forkSessionFile!)} ${shellQuote(`@${promptFile}`)}`
+		: `pi ${shellQuote(`@${promptFile}`)}`;
+	const handoffId = randomUUID();
+	const statusFile = join(tmpdir(), `pi-worktree-herdr-${handoffId}.status`);
+	const setupLogFile = join(tmpdir(), `pi-worktree-herdr-${handoffId}.setup.log`);
+	const bootstrapScript = createTempTextFile(".sh", [
+		"#!/bin/sh",
+		`status_file=${shellQuote(statusFile)}`,
+		`log_file=${shellQuote(setupLogFile)}`,
+		"if ! command -v pi >/dev/null 2>&1; then printf 'launch-failed: pi not found\\n' > \"$status_file\"; exit 1; fi",
+		sessionForked ? `if [ ! -f ${shellQuote(forkSessionFile!)} ]; then printf 'launch-failed: session file missing\\n' > \"$status_file\"; exit 1; fi` : "",
+		`if [ ! -f ${shellQuote(promptFile)} ]; then printf 'launch-failed: prompt file missing\\n' > \"$status_file\"; exit 1; fi`,
+		setupCommand ? `if ! (${setupCommand}) >\"$log_file\" 2>&1; then printf 'setup-failed\\n' > \"$status_file\"; exit 1; fi` : "",
+		"(sleep 1; if kill -0 $$ 2>/dev/null; then printf 'ready\\n' > \"$status_file\"; elif [ ! -f \"$status_file\" ]; then printf 'launch-failed\\n' > \"$status_file\"; fi) >/dev/null 2>&1 &",
+		`exec ${piCommand} || { printf 'launch-failed\\n' > \"$status_file\"; exit 1; }`,
+	].filter(Boolean).join("\n"));
+	const runResult = await runCommandAsync(`herdr pane run ${shellQuote(paneId)} ${shellQuote(`sh ${shellQuote(bootstrapScript)}`)}`, {
+		signal,
+		timeoutMs: 15_000,
+	});
+	if (runResult.aborted) {
+		cleanupTempFiles(statusFile, setupLogFile, forkSessionFile ?? "", promptFile, bootstrapScript);
+		void runCommandAsync(`herdr tab close ${shellQuote(tabId)}`, { timeoutMs: 5_000 });
+		return { cancelled: true };
+	}
+	if (!runResult.ok) {
+		cleanupTempFiles(statusFile, setupLogFile, forkSessionFile ?? "", promptFile, bootstrapScript);
+		void runCommandAsync(`herdr tab close ${shellQuote(tabId)}`, { timeoutMs: 5_000 });
+		throw new Error(`Failed to launch Pi in Herdr tab:\n${runResult.output}`);
+	}
+
+	try {
+		const handoffStatus = await waitForHerdrHandoffStatus(statusFile, signal);
+		if (handoffStatus === null) {
+			cleanupTempFiles(forkSessionFile ?? "", promptFile, bootstrapScript);
+			void runCommandAsync(`herdr tab close ${shellQuote(tabId)}`, { timeoutMs: 5_000 });
+			return { cancelled: true };
+		}
+		if (handoffStatus !== "ready") {
+			void runCommandAsync(`herdr tab close ${shellQuote(tabId)}`, { timeoutMs: 5_000 });
+			const setupLog = readTextFileIfExists(setupLogFile)?.trim();
+			if (handoffStatus === "setup-failed") {
+				throw new Error(setupLog ? `Setup failed:\n${setupLog}` : "Setup failed.");
+			}
+			if (handoffStatus.startsWith("launch-failed")) {
+				const reason = handoffStatus.slice("launch-failed".length).replace(/^:\s*/, "");
+				throw new Error(`Failed to launch Pi in Herdr tab${reason ? `: ${reason}` : "."}`);
+			}
+			throw new Error(`Failed to launch Pi in Herdr tab${setupLog ? `:\n${setupLog}` : "."}`);
+		}
+
+		return {
+			cancelled: false,
+			tabId,
+			paneId,
+			sessionForked,
+			setupNote: setupCommand ? "Setup completed" : null,
+		};
+	} catch (e) {
+		cleanupTempFiles(forkSessionFile ?? "", promptFile, bootstrapScript);
+		void runCommandAsync(`herdr tab close ${shellQuote(tabId)}`, { timeoutMs: 5_000 });
+		throw e;
+	} finally {
+		cleanupTempFiles(statusFile, setupLogFile);
+	}
+}
+
 function listWorktrees(): WorktreeListItem[] {
 	const mainRoot = getMainWorktreeRoot();
 	const currentWorktreePath = (() => {
@@ -837,13 +1064,13 @@ async function runCommandWithLoader(
 
 async function runSetupIfPresent(ctx: ExtensionContext, worktreePath: string, label: string, signal?: AbortSignal): Promise<string | null> {
 	try {
-		const conductorScripts = readConductorScripts(worktreePath);
-		if (!conductorScripts?.setup) return null;
+		const setupCommand = getSetupCommand(worktreePath);
+		if (!setupCommand) return null;
 
 		const setupResult = await runCommandWithLoader(
 			ctx,
 			`Running setup for ${label}...`,
-			conductorScripts.setup,
+			setupCommand,
 			worktreePath,
 			signal,
 		);
@@ -925,40 +1152,7 @@ function restoreSessionWorktreeState(ctx: ExtensionContext) {
 	updateStatus(ctx);
 }
 
-async function switchToMainWorktree(ctx: ExtensionContext, mainRoot: string, mainBranch: string, signal?: AbortSignal): Promise<WorktreeSwitchOutcome> {
-	if (signal?.aborted) {
-		ctx.ui.notify("Switch cancelled.", "info");
-		return { kind: "cancelled" };
-	}
-	try {
-		process.chdir(mainRoot);
-	} catch (e: any) {
-		ctx.ui.notify(`Failed to chdir: ${e.message}`, "error");
-		return { kind: "failed" };
-	}
-
-	currentState = null;
-	syncPrMetadataRefresh(ctx);
-	updateStatus(ctx);
-	const setupNote = await runSetupIfPresent(ctx, mainRoot, mainBranch, signal);
-	const parts = [`Switched to main worktree: ${mainRoot}`];
-	if (setupNote) parts.push(setupNote);
-	ctx.ui.notify(parts.join("\n"), setupNote === "Setup cancelled" ? "info" : setupNote && setupNote !== "Setup completed" ? "warning" : "success");
-	return { kind: "switched", setupNote };
-}
-
-async function switchToExistingWorktree(ctx: ExtensionContext, nextState: WorktreeState, signal?: AbortSignal): Promise<WorktreeSwitchOutcome> {
-	if (signal?.aborted) {
-		ctx.ui.notify("Switch cancelled.", "info");
-		return { kind: "cancelled" };
-	}
-	try {
-		process.chdir(nextState.worktreePath);
-	} catch (e: any) {
-		ctx.ui.notify(`Failed to chdir: ${e.message}`, "error");
-		return { kind: "failed" };
-	}
-
+async function enrichWorktreeStateWithPrInfo(nextState: WorktreeState, signal?: AbortSignal): Promise<WorktreeState> {
 	let { prNumber, prUrl, prState, prChecksStatus, prIsDraft, prReviewDecision, prMergeStateStatus } = nextState;
 	if (!signal?.aborted && !prNumber && !nextState.branch.startsWith("(")) {
 		const branchPrInfo = await getBranchPrInfoAsync(nextState.branch, nextState.worktreePath, signal);
@@ -973,7 +1167,7 @@ async function switchToExistingWorktree(ctx: ExtensionContext, nextState: Worktr
 		}
 	}
 
-	currentState = {
+	return {
 		worktreePath: nextState.worktreePath,
 		branch: nextState.branch,
 		prNumber,
@@ -984,17 +1178,112 @@ async function switchToExistingWorktree(ctx: ExtensionContext, nextState: Worktr
 		prReviewDecision,
 		prMergeStateStatus,
 	};
+}
+
+async function handoffToHerdrWorktree(ctx: ExtensionContext, nextState: WorktreeState, signal?: AbortSignal): Promise<WorktreeSwitchOutcome> {
+	if (signal?.aborted) {
+		ctx.ui.notify("Switch cancelled.", "info");
+		return { kind: "cancelled" };
+	}
+
+	const resolvedState = await enrichWorktreeStateWithPrInfo(nextState, signal);
+	let launch: HerdrLaunchResult;
+	try {
+		launch = await launchPiInHerdrTab(ctx, resolvedState, signal);
+	} catch (e: any) {
+		ctx.ui.notify(e.message, "error");
+		return { kind: "failed", error: e.message };
+	}
+	if (launch.cancelled) {
+		ctx.ui.notify("Switch cancelled.", "info");
+		return { kind: "cancelled" };
+	}
+
+	const setupNote = launch.setupNote;
+	const parts = [
+		`Opened worktree in new Herdr tab: ${resolvedState.worktreePath}`,
+		`Branch: ${resolvedState.branch}`,
+		`Herdr tab: ${launch.tabId}`,
+	];
+	if (resolvedState.prUrl) parts.push(`PR: ${resolvedState.prUrl}`);
+	parts.push(launch.sessionForked ? "Forked Pi session continues there." : "Started a fresh Pi session there because the current session could not be forked, so you may need to restate the task there.");
+	if (setupNote) parts.push(setupNote);
+	ctx.ui.notify(parts.join("\n"), setupNote === "Setup cancelled" ? "info" : setupNote && setupNote !== "Setup completed" ? "warning" : "success");
+	return {
+		kind: "handed-off",
+		state: resolvedState,
+		setupNote,
+		tabId: launch.tabId,
+		paneId: launch.paneId,
+		sessionForked: launch.sessionForked,
+	};
+}
+
+async function switchToMainWorktree(ctx: ExtensionContext, mainRoot: string, mainBranch: string, signal?: AbortSignal): Promise<WorktreeSwitchOutcome> {
+	if (shouldUseHerdrHandoff()) {
+		return handoffToHerdrWorktree(ctx, {
+			worktreePath: mainRoot,
+			branch: mainBranch,
+			prNumber: null,
+			prUrl: null,
+			prState: null,
+			prChecksStatus: null,
+			prIsDraft: false,
+			prReviewDecision: null,
+			prMergeStateStatus: null,
+		}, signal);
+	}
+	if (signal?.aborted) {
+		ctx.ui.notify("Switch cancelled.", "info");
+		return { kind: "cancelled" };
+	}
+	try {
+		process.chdir(mainRoot);
+	} catch (e: any) {
+		const error = `Failed to chdir: ${e.message}`;
+		ctx.ui.notify(error, "error");
+		return { kind: "failed", error };
+	}
+
+	currentState = null;
+	syncPrMetadataRefresh(ctx);
+	updateStatus(ctx);
+	const setupNote = await runSetupIfPresent(ctx, mainRoot, mainBranch, signal);
+	const parts = [`Switched to main worktree: ${mainRoot}`];
+	if (setupNote) parts.push(setupNote);
+	ctx.ui.notify(parts.join("\n"), setupNote === "Setup cancelled" ? "info" : setupNote && setupNote !== "Setup completed" ? "warning" : "success");
+	return { kind: "switched", setupNote };
+}
+
+async function switchToExistingWorktree(ctx: ExtensionContext, nextState: WorktreeState, signal?: AbortSignal): Promise<WorktreeSwitchOutcome> {
+	if (shouldUseHerdrHandoff()) {
+		return handoffToHerdrWorktree(ctx, nextState, signal);
+	}
+	if (signal?.aborted) {
+		ctx.ui.notify("Switch cancelled.", "info");
+		return { kind: "cancelled" };
+	}
+	try {
+		process.chdir(nextState.worktreePath);
+	} catch (e: any) {
+		const error = `Failed to chdir: ${e.message}`;
+		ctx.ui.notify(error, "error");
+		return { kind: "failed", error };
+	}
+
+	const resolvedState = await enrichWorktreeStateWithPrInfo(nextState, signal);
+	currentState = resolvedState;
 
 	syncPrMetadataRefresh(ctx);
 	updateStatus(ctx);
-	if (!prNumber && !nextState.branch.startsWith("(")) {
+	if (!resolvedState.prNumber && !resolvedState.branch.startsWith("(")) {
 		void refreshCurrentPrMetadata(ctx);
 	}
 
-	const setupNote = await runSetupIfPresent(ctx, nextState.worktreePath, nextState.branch, signal);
+	const setupNote = await runSetupIfPresent(ctx, resolvedState.worktreePath, resolvedState.branch, signal);
 
-	const parts = [`Switched to worktree: ${nextState.worktreePath}`, `Branch: ${nextState.branch}`];
-	if (prUrl) parts.push(`PR: ${prUrl}`);
+	const parts = [`Switched to worktree: ${resolvedState.worktreePath}`, `Branch: ${resolvedState.branch}`];
+	if (resolvedState.prUrl) parts.push(`PR: ${resolvedState.prUrl}`);
 	if (setupNote) parts.push(setupNote);
 	ctx.ui.notify(parts.join("\n"), setupNote === "Setup cancelled" ? "info" : setupNote && setupNote !== "Setup completed" ? "warning" : "success");
 	return { kind: "switched", setupNote };
@@ -1276,14 +1565,28 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
+	function queueHerdrHandoffMessage(worktreePath: string, branch: string, tabId: string, sessionForked: boolean): void {
+		pi.sendMessage({
+			customType: HERDR_HANDOFF_MESSAGE_TYPE,
+			content: sessionForked
+				? `A new Herdr tab (${tabId}) is now running a forked Pi session in ${worktreePath} on branch ${branch}. Do not continue the task in this session. Reply with one short sentence telling the user that work continues in the new tab.`
+				: `A new Herdr tab (${tabId}) is now running a fresh Pi session in ${worktreePath} on branch ${branch}. Do not continue the task in this session. Reply with one short sentence telling the user the new tab is open there and they may need to restate the task because the current session could not be forked.`,
+			display: false,
+		}, {
+			deliverAs: "steer",
+		});
+	}
+
 	pi.registerTool({
 		name: "worktree_create",
 		label: "Worktree Create",
-		description: "Create or reuse a git worktree from a branch name, PR number, or GitHub PR URL, and optionally switch the current session into it.",
-		promptSnippet: "Create or reuse a git worktree for a branch, PR number, or PR URL and optionally switch the current session into it.",
+		description: "Create or reuse a git worktree from a branch name, PR number, or GitHub PR URL, and optionally switch into it. Inside Herdr with the herdr CLI available, switching opens a new tab with a Pi session in the target worktree, forked when the current session is persisted.",
+		promptSnippet: "Create or reuse a git worktree for a branch, PR number, or PR URL and optionally switch into it. Inside Herdr with the herdr CLI available, switching launches a new tab with a Pi session there, forked when possible.",
 		promptGuidelines: [
 			"Use this instead of shelling out to git worktree when you want the worktree extension's PR resolution and reuse behavior.",
 			"Set switchTo to true when you want the current Pi session cwd to move into the resolved worktree.",
+			"When Pi is running inside Herdr (HERDR_ENV=1) and the herdr CLI is available, switchTo launches a new Herdr tab with a Pi session in the target worktree instead of chdir-ing the current process; the session is forked when the current session is persisted, otherwise fresh.",
+			"After a Herdr handoff, stop working in the original session. If the new tab was started fresh instead of forked, tell the user they may need to restate the task there.",
 			"Set targetKind to branch when target should be interpreted literally as a branch name instead of a PR reference or the main-worktree alias.",
 		],
 		parameters: Type.Object({
@@ -1294,7 +1597,7 @@ export default function (pi: ExtensionAPI) {
 					Type.Literal("branch"),
 				], { description: "How to interpret target. Use branch to force target to be treated as a branch name. Defaults to auto." }),
 			),
-			switchTo: Type.Optional(Type.Boolean({ description: "When true, switch the current Pi session into the resolved worktree/main checkout. Defaults to false." })),
+			switchTo: Type.Optional(Type.Boolean({ description: "When true, switch the current Pi session into the resolved worktree/main checkout. Inside Herdr with the herdr CLI available, this launches a new Herdr tab with a Pi session in the target worktree instead, forked when the current session is persisted. Defaults to false." })),
 		}),
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			const target = params.target.trim();
@@ -1324,6 +1627,10 @@ export default function (pi: ExtensionAPI) {
 				const mainBranch = getMainBranch(mainRoot);
 				let setupNote: string | null = null;
 				let switchedCurrentSession = false;
+				let handedOffToNewSession = false;
+				let herdrTabId: string | null = null;
+				let herdrPaneId: string | null = null;
+				let sessionForked = false;
 				let switchStatus = switchTo ? "completed" : "not-requested";
 				if (switchTo) {
 					const switchOutcome = await switchToMainWorktree(ctx, mainRoot, mainBranch, signal);
@@ -1336,17 +1643,30 @@ Switch cancelled before changing the current session.` }],
 								branch: mainBranch,
 								worktreePath: mainRoot,
 								switchedCurrentSession: false,
+								handedOffToNewSession: false,
+								herdrTabId: null,
+								herdrPaneId: null,
+								sessionForked: false,
 								setupNote: null,
 								setupStatus: "not-run",
 								switchStatus: "cancelled",
 							},
 						};
 					}
-					if (switchOutcome.kind === "failed") throw new Error(`Failed to switch current session to ${mainRoot}`);
+					if (switchOutcome.kind === "failed") throw new Error(switchOutcome.error);
 					setupNote = switchOutcome.setupNote;
-					switchedCurrentSession = true;
+					switchedCurrentSession = switchOutcome.kind === "switched";
+					handedOffToNewSession = switchOutcome.kind === "handed-off";
+					if (switchOutcome.kind === "handed-off") {
+						herdrTabId = switchOutcome.tabId;
+						herdrPaneId = switchOutcome.paneId;
+						sessionForked = switchOutcome.sessionForked;
+						switchStatus = "handed-off";
+						queueHerdrHandoffMessage(mainRoot, mainBranch, switchOutcome.tabId, switchOutcome.sessionForked);
+					}
 				}
-				const lines = [`${switchedCurrentSession ? "Switched to main worktree" : "Main worktree"}: ${mainRoot}`];
+				const lines = [`${switchedCurrentSession ? "Switched to main worktree" : handedOffToNewSession ? "Opened main worktree in a new Herdr tab" : "Main worktree"}: ${mainRoot}`];
+				if (handedOffToNewSession) lines.push(sessionForked ? "The original session stayed in place; the new Pi session continues there." : "The original session stayed in place; a fresh Pi session was opened there, so the user may need to restate the task.");
 				if (setupNote) lines.push(setupNote);
 				return {
 					content: [{ type: "text", text: lines.join("\n") }],
@@ -1355,6 +1675,10 @@ Switch cancelled before changing the current session.` }],
 						branch: mainBranch,
 						worktreePath: mainRoot,
 						switchedCurrentSession,
+						handedOffToNewSession,
+						herdrTabId,
+						herdrPaneId,
+						sessionForked,
 						setupNote,
 						setupStatus: getSetupStatus(setupNote),
 						switchStatus,
@@ -1367,6 +1691,10 @@ Switch cancelled before changing the current session.` }],
 			if (result.kind === "main") {
 				let setupNote: string | null = null;
 				let switchedCurrentSession = false;
+				let handedOffToNewSession = false;
+				let herdrTabId: string | null = null;
+				let herdrPaneId: string | null = null;
+				let sessionForked = false;
 				let switchStatus = switchTo ? "completed" : "not-requested";
 				if (switchTo) {
 					const switchOutcome = await switchToMainWorktree(ctx, result.mainRoot, result.mainBranch, signal);
@@ -1379,17 +1707,30 @@ Switch cancelled before changing the current session.` }],
 								branch: result.mainBranch,
 								worktreePath: result.mainRoot,
 								switchedCurrentSession: false,
+								handedOffToNewSession: false,
+								herdrTabId: null,
+								herdrPaneId: null,
+								sessionForked: false,
 								setupNote: null,
 								setupStatus: "not-run",
 								switchStatus: "cancelled",
 							},
 						};
 					}
-					if (switchOutcome.kind === "failed") throw new Error(`Failed to switch current session to ${result.mainRoot}`);
+					if (switchOutcome.kind === "failed") throw new Error(switchOutcome.error);
 					setupNote = switchOutcome.setupNote;
-					switchedCurrentSession = true;
+					switchedCurrentSession = switchOutcome.kind === "switched";
+					handedOffToNewSession = switchOutcome.kind === "handed-off";
+					if (switchOutcome.kind === "handed-off") {
+						herdrTabId = switchOutcome.tabId;
+						herdrPaneId = switchOutcome.paneId;
+						sessionForked = switchOutcome.sessionForked;
+						switchStatus = "handed-off";
+						queueHerdrHandoffMessage(result.mainRoot, result.mainBranch, switchOutcome.tabId, switchOutcome.sessionForked);
+					}
 				}
-				const lines = [`${switchedCurrentSession ? "Switched to main worktree" : "Main worktree"}: ${result.mainRoot}`];
+				const lines = [`${switchedCurrentSession ? "Switched to main worktree" : handedOffToNewSession ? "Opened main worktree in a new Herdr tab" : "Main worktree"}: ${result.mainRoot}`];
+				if (handedOffToNewSession) lines.push(sessionForked ? "The original session stayed in place; the new Pi session continues there." : "The original session stayed in place; a fresh Pi session was opened there, so the user may need to restate the task.");
 				if (setupNote) lines.push(setupNote);
 				return {
 					content: [{ type: "text", text: lines.join("\n") }],
@@ -1398,6 +1739,10 @@ Switch cancelled before changing the current session.` }],
 						branch: result.mainBranch,
 						worktreePath: result.mainRoot,
 						switchedCurrentSession,
+						handedOffToNewSession,
+						herdrTabId,
+						herdrPaneId,
+						sessionForked,
 						setupNote,
 						setupStatus: getSetupStatus(setupNote),
 						switchStatus,
@@ -1407,6 +1752,11 @@ Switch cancelled before changing the current session.` }],
 
 			let setupNote: string | null = null;
 			let switchedCurrentSession = false;
+			let handedOffToNewSession = false;
+			let herdrTabId: string | null = null;
+			let herdrPaneId: string | null = null;
+			let sessionForked = false;
+			let handedOffState: WorktreeState | null = null;
 			let switchStatus = switchTo ? "completed" : "not-requested";
 			if (switchTo) {
 				const switchOutcome = await switchToExistingWorktree(ctx, result.state, signal);
@@ -1427,25 +1777,41 @@ Switch cancelled before changing the current session.` }],
 							prUrl: result.state.prUrl,
 							created: result.created,
 							switchedCurrentSession: false,
+							handedOffToNewSession: false,
+							herdrTabId: null,
+							herdrPaneId: null,
+							sessionForked: false,
 							setupNote: null,
 							setupStatus: "not-run",
 							switchStatus: "cancelled",
 						},
 					};
 				}
-				if (switchOutcome.kind === "failed") throw new Error(`Failed to switch current session to ${result.state.worktreePath}`);
+				if (switchOutcome.kind === "failed") throw new Error(switchOutcome.error);
 				setupNote = switchOutcome.setupNote;
-				switchedCurrentSession = true;
+				switchedCurrentSession = switchOutcome.kind === "switched";
+				handedOffToNewSession = switchOutcome.kind === "handed-off";
+				if (switchOutcome.kind === "handed-off") {
+					herdrTabId = switchOutcome.tabId;
+					herdrPaneId = switchOutcome.paneId;
+					sessionForked = switchOutcome.sessionForked;
+					handedOffState = switchOutcome.state;
+					switchStatus = "handed-off";
+					queueHerdrHandoffMessage(result.state.worktreePath, result.state.branch, switchOutcome.tabId, switchOutcome.sessionForked);
+				}
 			}
 
-			const responseState = switchedCurrentSession && currentState?.worktreePath === result.state.worktreePath
-				? currentState
-				: result.state;
+			const responseState = handedOffState
+				? handedOffState
+				: switchedCurrentSession && currentState?.worktreePath === result.state.worktreePath
+					? currentState
+					: result.state;
 			const lines = [
-				`${switchedCurrentSession ? `${result.created ? "Created" : "Reused"} and switched to worktree` : `${result.created ? "Created" : "Reused"} worktree`}: ${responseState.worktreePath}`,
+				`${switchedCurrentSession ? `${result.created ? "Created" : "Reused"} and switched to worktree` : handedOffToNewSession ? `${result.created ? "Created" : "Reused"} worktree and opened a new Herdr tab` : `${result.created ? "Created" : "Reused"} worktree`}: ${responseState.worktreePath}`,
 				`Branch: ${responseState.branch}`,
 			];
 			if (responseState.prUrl) lines.push(`PR: ${responseState.prUrl}`);
+			if (handedOffToNewSession) lines.push(sessionForked ? "The original session stayed in place; the new Pi session continues there." : "The original session stayed in place; a fresh Pi session was opened there, so the user may need to restate the task.");
 			if (setupNote) lines.push(setupNote);
 
 			return {
@@ -1458,6 +1824,10 @@ Switch cancelled before changing the current session.` }],
 					prUrl: responseState.prUrl,
 					created: result.created,
 					switchedCurrentSession,
+					handedOffToNewSession,
+					herdrTabId,
+					herdrPaneId,
+					sessionForked,
 					setupNote,
 					setupStatus: getSetupStatus(setupNote),
 					switchStatus,
@@ -1479,6 +1849,7 @@ Switch cancelled before changing the current session.` }],
 						"",
 						"Opens a popup overlay listing git worktrees with PR metadata.",
 						"Select one and press Enter to switch into it.",
+						"Inside Herdr with the herdr CLI available, switches open a new tab with a Pi session in the target worktree; history is forked when the current session is persisted.",
 					].join("\n"),
 					"info",
 				);
@@ -1541,6 +1912,7 @@ Switch cancelled before changing the current session.` }],
 						"  --isolated   request isolated setup during creation",
 						"",
 						"After switching, local conductor.json scripts.setup is used if present.",
+						"Inside Herdr with the herdr CLI available, switches open a new tab with a Pi session in the target worktree instead of chdir-ing the current process; history is forked when the current session is persisted.",
 					].join("\n"),
 					"info",
 				);
