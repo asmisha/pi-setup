@@ -60,6 +60,7 @@ Verified from Pi's package docs and the checked-in settings file:
   - `git:github.com/jo-inc/pi-mem`
   - `https://github.com/SamuelLHuber/pi-fff`
   - `npm:pi-executor`
+  - `npm:@robhowley/pi-structured-return`
 - the repo-local `extensions/` and `skills/` directories are wired through relative paths in `.pi/settings.json`
 - project installs land under `.pi/npm/` and `.pi/git/`, which are intentionally gitignored
 

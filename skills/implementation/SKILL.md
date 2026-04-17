@@ -52,12 +52,13 @@ Use this skill for code changes. Optimize for the simplest high-quality solution
 5. **Implement in small verified steps**
    - Read before each edit.
    - Run targeted verification immediately after each step.
+   - Prefer `structured_return` over `bash` for noisy test/lint/type/build/syntax commands; use machine-readable, quiet, and narrow-scope flags when supported, and keep `bash` for already-compact output.
    - If something fails, fix the root cause with the smallest safe change.
    - If the user corrects you, rejects part of the approach, or changes direction, stop following the old plan. Re-scope from the user's latest instruction and continue only with work that is still explicitly in scope. A follow-up is not a narrow mechanical correction when it changes where behavior belongs, which existing abstraction should be reused, or whether a helper should exist. Re-check ownership and reuse before editing. If you believe broader follow-up work is necessary, explain why and ask first.
    - If implementation starts drifting toward a new mechanism or duplicated logic, pause and re-check whether an existing abstraction or execution path should be reused instead.
 
 6. **Do a focused final audit**
-   - Run the relevant test/lint/type/build/syntax commands.
+   - Run the relevant test/lint/type/build/syntax commands, preferring `structured_return` for noisy verification output.
    - Review the diff for accidental edits, dead code, stale comments, and unused imports.
    - For non-trivial diffs, run both `correctness-reviewer` and `simplicity-reviewer` before presenting results.
 
