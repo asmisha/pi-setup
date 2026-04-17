@@ -1,0 +1,14 @@
+{
+  "packages": [
+    "npm:pi-subagents",
+    "git:github.com/jo-inc/pi-mem",
+    "https://github.com/SamuelLHuber/pi-fff",
+    "npm:pi-executor"
+  ],
+  "extensions": [
+    "../extensions"
+  ],
+  "skills": [
+    "../skills"
+  ]
+}

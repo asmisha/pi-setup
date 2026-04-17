@@ -48,6 +48,23 @@ A prompt template for moving the current PR out of draft and requesting review f
 ### `scripts/select-pr-reviewers.sh`
 A shell script that inspects the current PR with `gh`, ranks recent contributors for changed files, filters out unsuitable reviewers, and prints tab-separated results.
 
+## Shared Pi project settings
+
+This repo now includes `.pi/settings.json` to sync the repo-scoped Pi setup between machines.
+
+Verified from Pi's package docs and the checked-in settings file:
+
+- project-local `packages` are auto-installed by Pi on startup if missing
+- the tracked package list currently includes:
+  - `npm:pi-subagents`
+  - `git:github.com/jo-inc/pi-mem`
+  - `https://github.com/SamuelLHuber/pi-fff`
+  - `npm:pi-executor`
+- the repo-local `extensions/` and `skills/` directories are wired through relative paths in `.pi/settings.json`
+- project installs land under `.pi/npm/` and `.pi/git/`, which are intentionally gitignored
+
+This keeps the extension/package list in the repo so a new machine can pick it up without redoing the package install list by hand.
+
 ## Scope note
 
 This repo contains configuration, extensions, prompts, and workflow helpers. It does **not** currently document a build, packaging, or installation flow in the checked-in files verified for this rewrite.
