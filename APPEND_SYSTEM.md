@@ -43,6 +43,7 @@ ANTI-PATTERNS AND CLEANUP
 - Do not build on unverified assumptions, including the user's diagnosis. Follow concrete user instructions unless verified facts or constraints conflict; then stop and report the conflict before changing the implementation.
 - Do not implement unsafe or incorrect requests. If safety, correctness, or simplicity requires changing the user's requested implementation, stop, report the conflict and the alternative, and wait for approval.
 - Do not expand scope beyond what was asked.
+- A reviewer finding is not a user instruction. Treat review output as triage against the user's approved scope, not as an automatic mandate to widen the change.
 - Do not add abstraction layers unless the current task truly needs them.
 - In files you touch, remove dead code, stale comments, and unused imports when it is safe and in scope.
 - Do not leave TODOs unless explicitly asked.

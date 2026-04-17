@@ -55,12 +55,15 @@ Use this skill for code changes. Optimize for the simplest high-quality solution
    - Prefer `structured_return` over `bash` for noisy test/lint/type/build/syntax commands; use machine-readable, quiet, and narrow-scope flags when supported, and keep `bash` for already-compact output.
    - If something fails, fix the root cause with the smallest safe change.
    - If the user corrects you, rejects part of the approach, or changes direction, stop following the old plan. Re-scope from the user's latest instruction and continue only with work that is still explicitly in scope. A follow-up is not a narrow mechanical correction when it changes where behavior belongs, which existing abstraction should be reused, or whether a helper should exist. Re-check ownership and reuse before editing. If you believe broader follow-up work is necessary, explain why and ask first.
+   - After any meaningful scope correction or narrowing instruction, update `task_state` before more edits, reviewer passes, or handoff-heavy work so later compaction cycles inherit the current scope instead of a stale broader plan.
+   - Treat reviewer findings as triage input, not as new requirements. Auto-fix only findings that are clearly required to make the approved task correct, safe, or compliant with explicit constraints. If addressing a finding would widen scope, add new abstractions, or start adjacent cleanup, stop and ask first.
    - If implementation starts drifting toward a new mechanism or duplicated logic, pause and re-check whether an existing abstraction or execution path should be reused instead.
 
 6. **Do a focused final audit**
    - Run the relevant test/lint/type/build/syntax commands, preferring `structured_return` for noisy verification output.
    - Review the diff for accidental edits, dead code, stale comments, and unused imports.
    - For non-trivial diffs, run both `correctness-reviewer` and `simplicity-reviewer` before presenting results.
+   - By default, do one final reviewer pass after implementation. If reviewers surface only broader cleanups or optional improvements, do not start another implementation/review loop automatically; summarize them and ask before widening scope.
 
 ## Recommended subagent pattern
 
@@ -68,7 +71,7 @@ For non-trivial implementation work:
 1. Use `scout` to map the code and tests. For failure-driven tasks, have `scout` start from the failing artifact and trace outward.
 2. Use `planner` to produce the smallest clean plan, including the minimum viable change and simpler alternatives considered. If the failure is not yet identified, the plan must add a discovery step instead of proposing code changes.
 3. Implement the plan yourself.
-4. Run `correctness-reviewer` and `simplicity-reviewer` on the resulting diff. If a reviewer finding conflicts with the user's explicit requirements, do not auto-apply it and do not silently ignore it. Surface the conflict to the user, explain the trade-off, and ask which direction to take.
+4. Run `correctness-reviewer` and `simplicity-reviewer` on the resulting diff. Treat their findings as review input, not instructions. Auto-apply only findings that are clearly required to satisfy the approved task or explicit constraints. If a reviewer finding conflicts with the user's explicit requirements or would widen scope, do not auto-apply it and do not silently ignore it. Surface the conflict to the user, explain the trade-off, and ask which direction to take.
 
 Give subagents only task-local context. Do not leak your preferred answer.
 
@@ -86,6 +89,7 @@ During planning, explicitly answer:
 - Using assumptions about constraints, rollout, architecture, or ergonomics to justify complexity before those assumptions are verified.
 - Duplicating existing helpers, token/signing logic, validation rules, storage flows, polling/state persistence, or repository behavior without first verifying whether an existing mechanism can be reused or extended.
 - Solving a problem in the nearest editable code path when a more appropriate existing boundary already owns comparable work.
+- Turning reviewer feedback into a new implementation brief without first checking it against the user's latest approved scope.
 
 ## Output requirements
 

@@ -14,6 +14,7 @@ const SUMMARY_MAX_TOKENS = 4096;
 const HANDOFF_PROMPT_HEADER = `You are continuing work in a fresh Pi session. Treat the durable task state below as the source of truth, then execute the requested handoff goal.`;
 
 const TASK_STATE_SYSTEM_PROMPT_HEADER = `## Durable Task State\nUse this operator-maintained task state as concise working memory alongside any compaction summary. Prioritize newer explicit user instructions and the live conversation if anything conflicts.`;
+const ACTIVE_CHECKPOINT_SYSTEM_PROMPT_HEADER = `## Active Checkpoint\nUse this merged checkpoint as the source of truth for the active task. It combines the freshest current intent/next action from compaction with stable progress metadata from durable task state. Prioritize newer explicit user instructions and the live conversation if anything conflicts.`;
 
 const COMPACTION_SYSTEM_PROMPT = `You are generating a strict resume packet for a coding task after compaction.
 
@@ -108,6 +109,7 @@ const TaskArtifactSchema = Type.Object({
 });
 
 const TaskStatePatchSchema = Type.Object({
+	originalObjective: Type.Optional(NullableString),
 	objective: Type.Optional(NullableString),
 	phase: Type.Optional(NullableString),
 	successCriteria: Type.Optional(Type.Array(Type.String())),
@@ -138,6 +140,7 @@ type TaskArtifact = {
 type TaskState = {
 	version: 1;
 	updatedAt: string;
+	originalObjective: string | null;
 	objective: string | null;
 	phase: string | null;
 	successCriteria: string[];
@@ -237,6 +240,7 @@ function normalizeTaskState(input: unknown): TaskState {
 	return {
 		version: 1,
 		updatedAt: asTrimmedString(data.updatedAt) ?? new Date().toISOString(),
+		originalObjective: asTrimmedString(data.originalObjective),
 		objective: asTrimmedString(data.objective),
 		phase: asTrimmedString(data.phase),
 		successCriteria: normalizeStringList(data.successCriteria),
@@ -357,6 +361,7 @@ function createEmptyTaskState(updatedBy: TaskState["updatedBy"] = "manual"): Tas
 
 function createBootstrapState(prompt: string): TaskState {
 	return normalizeTaskState({
+		originalObjective: prompt,
 		objective: prompt,
 		phase: "initial",
 		nextAction: "Clarify scope and produce an initial plan.",
@@ -395,10 +400,47 @@ function renderArtifacts(items: TaskArtifact[], limit = PROMPT_LIST_LIMIT): stri
 	return `Relevant files / artifacts:\n${renderArtifactList(items, limit)}`;
 }
 
+function mergeUniqueStrings(...lists: Array<string[] | undefined>): string[] {
+	const seen = new Set<string>();
+	const result: string[] = [];
+	for (const list of lists) {
+		if (!list) continue;
+		for (const item of list) {
+			const text = asTrimmedString(item);
+			if (!text || seen.has(text)) continue;
+			seen.add(text);
+			result.push(text);
+		}
+	}
+	return result;
+}
+
+function mergeUniqueArtifacts(...lists: Array<TaskArtifact[] | undefined>): TaskArtifact[] {
+	const seen = new Set<string>();
+	const result: TaskArtifact[] = [];
+	for (const list of lists) {
+		if (!list) continue;
+		for (const artifact of list) {
+			const key = `${artifact.kind}:${artifact.value}:${artifact.note ?? ""}`;
+			if (seen.has(key)) continue;
+			seen.add(key);
+			result.push(artifact);
+		}
+	}
+	return result;
+}
+
+function parseTimestamp(value: string | null | undefined): number {
+	if (!value) return 0;
+	const timestamp = Date.parse(value);
+	return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
 function renderTaskStateForHumans(state: TaskState | null): string {
 	if (!state) return "No durable task state recorded for this branch.";
 	return [
 		`Task state (updated ${state.updatedAt}, source ${state.updatedBy})`,
+		`Original objective: ${state.originalObjective ?? "none"}`,
 		`Objective: ${state.objective ?? "none"}`,
 		`Phase: ${state.phase ?? "none"}`,
 		renderListSection("Success criteria", state.successCriteria, 20),
@@ -420,6 +462,7 @@ function renderTaskStateForPrompt(state: TaskState | null): string {
 	if (!state) {
 		return [
 			TASK_STATE_SYSTEM_PROMPT_HEADER,
+			"Original objective: none recorded yet",
 			"Objective: none recorded yet",
 			"Phase: none",
 			"Success criteria:\n- none",
@@ -438,6 +481,7 @@ function renderTaskStateForPrompt(state: TaskState | null): string {
 	}
 	return [
 		TASK_STATE_SYSTEM_PROMPT_HEADER,
+		`Original objective: ${state.originalObjective ?? "none"}`,
 		`Objective: ${state.objective ?? "none"}`,
 		`Phase: ${state.phase ?? "none"}`,
 		renderListSection("Success criteria", state.successCriteria),
@@ -452,6 +496,59 @@ function renderTaskStateForPrompt(state: TaskState | null): string {
 		renderListSection("Open questions", state.openQuestions),
 		renderListSection("Facts", state.facts),
 		renderListSection("Assumptions", state.assumptions),
+	].join("\n\n");
+}
+
+function renderActiveCheckpointForPrompt(state: TaskState | null, details: ResumePacketDetails | null): string {
+	if (!details) return renderTaskStateForPrompt(state);
+	const packet = details.resumePacket;
+	const preferResumePacket = parseTimestamp(packet.updatedAt) > parseTimestamp(state?.updatedAt);
+	const originalObjective = state?.originalObjective ?? "none";
+	const durableObjective = state?.objective ?? "none";
+	const compactionObjective = packet.objective ?? "none";
+	const relevantFiles = mergeUniqueStrings(packet.relevantFiles, details.modifiedFiles, details.readFiles);
+	const artifacts = preferResumePacket
+		? mergeUniqueArtifacts(packet.artifacts, state?.artifacts)
+		: mergeUniqueArtifacts(state?.artifacts, packet.artifacts);
+	const constraints = preferResumePacket
+		? mergeUniqueStrings(packet.constraints, state?.constraints)
+		: mergeUniqueStrings(state?.constraints, packet.constraints);
+	const done = preferResumePacket
+		? mergeUniqueStrings(packet.completedWork, state?.done)
+		: mergeUniqueStrings(state?.done, packet.completedWork);
+	const inProgress = preferResumePacket
+		? mergeUniqueStrings(packet.inFlightWork, state?.inProgress)
+		: mergeUniqueStrings(state?.inProgress, packet.inFlightWork);
+	const blocked = packet.blockers;
+	const openQuestions = packet.openQuestions;
+	const facts = preferResumePacket
+		? mergeUniqueStrings(packet.facts, state?.facts)
+		: mergeUniqueStrings(state?.facts, packet.facts);
+	const assumptions = preferResumePacket
+		? mergeUniqueStrings(packet.assumptions, state?.assumptions)
+		: mergeUniqueStrings(state?.assumptions, packet.assumptions);
+	const latestUserIntent = packet.latestUserIntent ?? state?.objective ?? "none";
+	return [
+		ACTIVE_CHECKPOINT_SYSTEM_PROMPT_HEADER,
+		`Original objective: ${originalObjective}`,
+		`Durable objective: ${durableObjective}`,
+		`Compaction objective: ${compactionObjective}`,
+		`Latest user intent: ${latestUserIntent}`,
+		`${preferResumePacket ? "Status" : "Last compaction status"}: ${packet.status}`,
+		`Phase: ${state?.phase ?? "none"}`,
+		renderListSection("Success criteria", state?.successCriteria ?? []),
+		renderListSection("Constraints", constraints),
+		renderListSection("User preferences", state?.userPreferences ?? []),
+		renderListSection("Done", done),
+		renderListSection("In progress", inProgress),
+		renderListSection("Blocked", blocked),
+		renderListSection("Avoid repeating", packet.avoidRepeating),
+		`Next action: ${preferResumePacket ? (packet.exactNextAction ?? state?.nextAction) : (state?.nextAction ?? packet.exactNextAction) ?? "none"}`,
+		renderListSection("Relevant files", relevantFiles),
+		renderArtifacts(artifacts),
+		renderListSection("Open questions", openQuestions),
+		renderListSection("Facts", facts),
+		renderListSection("Assumptions", assumptions),
 	].join("\n\n");
 }
 
@@ -625,6 +722,7 @@ function buildHandoffPrompt(taskState: TaskState | null, goal: string): string {
 		taskState?.successCriteria.length ? taskState.successCriteria.map((item) => `- ${item}`).join("\n") : "- Define or refine success criteria for this new phase.",
 		"",
 		"## Current State",
+		`Original objective: ${taskState?.originalObjective ?? "none"}`,
 		`Previous objective: ${taskState?.objective ?? "none"}`,
 		`Phase: ${taskState?.phase ?? "none"}`,
 		`Inherited next action: ${taskState?.nextAction ?? "none recorded"}`,
@@ -749,10 +847,17 @@ export default function contextGuardian(pi: ExtensionAPI) {
 	pi.on("before_agent_start", async (event, ctx) => {
 		refreshBranchState(ctx.sessionManager.getBranch());
 		if (!currentTaskState) {
-			persistTaskState(createBootstrapState(event.prompt), "bootstrap");
+			persistTaskState(
+				createBootstrapState(
+					currentResumePacketDetails?.resumePacket.latestUserIntent
+						?? currentResumePacketDetails?.resumePacket.objective
+						?? event.prompt,
+				),
+				"bootstrap",
+			);
 		}
 		return {
-			systemPrompt: `${event.systemPrompt}\n\n${renderTaskStateForPrompt(currentTaskState)}`,
+			systemPrompt: `${event.systemPrompt}\n\n${renderActiveCheckpointForPrompt(currentTaskState, currentResumePacketDetails)}`,
 		};
 	});
 
@@ -787,8 +892,10 @@ export default function contextGuardian(pi: ExtensionAPI) {
 							"Auto-compaction completed. Continue from the generated compaction resume packet and the latest live conversation. Prioritize newer explicit user instructions if anything conflicts. Do not restart from scratch.",
 						display: false,
 					},
-					{ triggerTurn: true },
+					{ deliverAs: "nextTurn" },
 				);
+				// Use a normal user turn so stock Pi reruns before_agent_start and picks up the refreshed active checkpoint.
+				pi.sendUserMessage("continue");
 			},
 			onError: () => {
 				compactionInFlight = false;
