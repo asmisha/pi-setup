@@ -21,6 +21,72 @@ test("widget shows planning state before explicit subtasks exist", () => {
   assert.equal(lines.some((line) => line.startsWith("Next:")), false);
 });
 
+test("ask label uses singular only for one", () => {
+  const boot = bootstrap("Ship CG2 widget");
+  const baseContract = boot.state.contract;
+  assert.ok(baseContract);
+
+  const zeroAskState = projectLedger([
+    ...boot.events,
+    {
+      type: ENTRY_TYPES.contractUpsert,
+      ...makeEventMeta("user", "authoritative", "2026-04-18T10:01:00.000Z"),
+      payload: {
+        contract: {
+          ...baseContract!,
+          explicitAsks: baseContract!.explicitAsks.map((ask) => ({ ...ask, status: "satisfied" as const, closedAt: "2026-04-18T10:01:00.000Z" })),
+          updatedAt: "2026-04-18T10:01:00.000Z",
+        },
+      },
+    },
+    {
+      type: ENTRY_TYPES.taskArchived,
+      ...makeEventMeta("manual", "authoritative", "2026-04-18T10:01:00.000Z"),
+      payload: { taskId: boot.state.openTaskIds[0], reason: "hide root-only planning state" },
+    },
+  ]);
+  const twoAskState = projectLedger([
+    ...boot.events,
+    {
+      type: ENTRY_TYPES.contractUpsert,
+      ...makeEventMeta("user", "authoritative", "2026-04-18T10:02:00.000Z"),
+      payload: {
+        contract: {
+          ...baseContract!,
+          explicitAsks: [
+            ...baseContract!.explicitAsks,
+            { id: "ask_002", text: "Second ask", status: "open", createdAt: "2026-04-18T10:02:00.000Z" },
+          ],
+          updatedAt: "2026-04-18T10:02:00.000Z",
+        },
+      },
+    },
+  ]);
+  const threeAskState = projectLedger([
+    ...boot.events,
+    {
+      type: ENTRY_TYPES.contractUpsert,
+      ...makeEventMeta("user", "authoritative", "2026-04-18T10:03:00.000Z"),
+      payload: {
+        contract: {
+          ...baseContract!,
+          explicitAsks: [
+            ...baseContract!.explicitAsks,
+            { id: "ask_002", text: "Second ask", status: "open", createdAt: "2026-04-18T10:02:00.000Z" },
+            { id: "ask_003", text: "Third ask", status: "open", createdAt: "2026-04-18T10:03:00.000Z" },
+          ],
+          updatedAt: "2026-04-18T10:03:00.000Z",
+        },
+      },
+    },
+  ]);
+
+  assert.equal(renderTodoStatusText(buildTodoWidgetSnapshot(zeroAskState)), null);
+  assert.equal(renderTodoStatusText(buildTodoWidgetSnapshot(boot.state)), "CG2 · planning · 1 ask");
+  assert.equal(renderTodoStatusText(buildTodoWidgetSnapshot(twoAskState)), "CG2 · planning · 2 asks");
+  assert.equal(renderTodoStatusText(buildTodoWidgetSnapshot(threeAskState)), "CG2 · planning · 3 asks");
+});
+
 test("widget hides the bootstrap root task once explicit subtasks exist", () => {
   const boot = bootstrap("Ship CG2 widget");
   const created = applyAction(

@@ -54,6 +54,14 @@ function formatStage(stage: ProjectedState["execution"]["stage"]): string {
   return stage.replace(/_/g, " ");
 }
 
+function countLabel(count: number, label: string): string {
+  return `${count} ${label}`;
+}
+
+function askCountLabel(count: number): string {
+  return `${count} ${count === 1 ? "ask" : "asks"}`;
+}
+
 function pluralize(count: number, singular: string, plural = `${singular}s`): string {
   return `${count} ${count === 1 ? singular : plural}`;
 }
@@ -105,17 +113,17 @@ function taskDetail(task: TaskItem): string | null {
 function summarizeMode(snapshot: TodoWidgetSnapshot): string {
   switch (snapshot.mode) {
     case "planning":
-      return snapshot.counts.openAsks > 0 ? `planning · ${pluralize(snapshot.counts.openAsks, "ask")}` : "planning";
+      return snapshot.counts.openAsks > 0 ? `planning · ${askCountLabel(snapshot.counts.openAsks)}` : "planning";
     case "waiting":
-      return `waiting on user · ${pluralize(snapshot.counts.open, "open")}`;
+      return `waiting on user · ${countLabel(snapshot.counts.open, "open")}`;
     case "blocked":
-      return `blocked · ${pluralize(snapshot.counts.open, "open")}`;
+      return `blocked · ${countLabel(snapshot.counts.open, "open")}`;
     case "active": {
       const parts: string[] = [];
-      if (snapshot.counts.inProgress > 0) parts.push(pluralize(snapshot.counts.inProgress, "active"));
-      if (snapshot.counts.open > 0) parts.push(pluralize(snapshot.counts.open, "open"));
-      if (snapshot.counts.doneCandidate > 0) parts.push(pluralize(snapshot.counts.doneCandidate, "ready"));
-      if (snapshot.counts.openAsks > 0) parts.push(pluralize(snapshot.counts.openAsks, "ask"));
+      if (snapshot.counts.inProgress > 0) parts.push(countLabel(snapshot.counts.inProgress, "active"));
+      if (snapshot.counts.open > 0) parts.push(countLabel(snapshot.counts.open, "open"));
+      if (snapshot.counts.doneCandidate > 0) parts.push(countLabel(snapshot.counts.doneCandidate, "ready"));
+      if (snapshot.counts.openAsks > 0) parts.push(askCountLabel(snapshot.counts.openAsks));
       return parts.join(" · ") || "active";
     }
   }
@@ -123,12 +131,12 @@ function summarizeMode(snapshot: TodoWidgetSnapshot): string {
 
 function buildSummaryBits(snapshot: TodoWidgetSnapshot): string[] {
   const bits: string[] = [];
-  if (snapshot.counts.inProgress > 0) bits.push(pluralize(snapshot.counts.inProgress, "active"));
-  if (snapshot.counts.awaitingUser > 0) bits.push(pluralize(snapshot.counts.awaitingUser, "waiting"));
-  if (snapshot.counts.blocked > 0) bits.push(pluralize(snapshot.counts.blocked, "blocked"));
-  if (snapshot.counts.open > 0) bits.push(pluralize(snapshot.counts.open, "open"));
-  if (snapshot.counts.doneCandidate > 0) bits.push(pluralize(snapshot.counts.doneCandidate, "ready"));
-  if (snapshot.counts.openAsks > 0) bits.push(pluralize(snapshot.counts.openAsks, "ask"));
+  if (snapshot.counts.inProgress > 0) bits.push(countLabel(snapshot.counts.inProgress, "active"));
+  if (snapshot.counts.awaitingUser > 0) bits.push(countLabel(snapshot.counts.awaitingUser, "waiting"));
+  if (snapshot.counts.blocked > 0) bits.push(countLabel(snapshot.counts.blocked, "blocked"));
+  if (snapshot.counts.open > 0) bits.push(countLabel(snapshot.counts.open, "open"));
+  if (snapshot.counts.doneCandidate > 0) bits.push(countLabel(snapshot.counts.doneCandidate, "ready"));
+  if (snapshot.counts.openAsks > 0) bits.push(askCountLabel(snapshot.counts.openAsks));
   return bits;
 }
 

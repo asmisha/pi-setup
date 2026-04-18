@@ -67,11 +67,58 @@ test("user acceptance can close a done_candidate task", () => {
   assert.equal(finalState.tasks[rootTaskId]?.doneReason, "user_acceptance");
 });
 
+
+test("commit_done can satisfy open asks in the same done-gated commit", () => {
+  const { state, events, nextId } = bootstrap("Explain result");
+  const rootTaskId = state.openTaskIds[0];
+  const rootAskId = state.openAskIds[0];
+
+  const proposed = applyTaskTrackerAction(state, { action: "propose_done", taskId: rootTaskId }, createContext(nextId));
+  const candidateEvents = [...events, ...proposed.events];
+  const candidateState = projectLedger(candidateEvents);
+
+  const evidence = applyTaskTrackerAction(
+    candidateState,
+    {
+      action: "add_evidence",
+      taskId: rootTaskId,
+      evidence: { kind: "test", ref: "npm test", summary: "All tests passed", level: "verified" },
+    },
+    createContext(nextId),
+  );
+  const withEvidenceEvents = [...candidateEvents, ...evidence.events];
+  const evidenceState = projectLedger(withEvidenceEvents);
+
+  const committed = applyTaskTrackerAction(
+    evidenceState,
+    { action: "commit_done", taskId: rootTaskId, reason: "verified_evidence", askIdsToSatisfy: [rootAskId] },
+    createContext(nextId),
+  );
+  const finalState = projectLedger([...withEvidenceEvents, ...committed.events]);
+
+  assert.equal(finalState.tasks[rootTaskId]?.status, "done");
+  assert.equal(finalState.contract?.explicitAsks.find((ask) => ask.id === rootAskId)?.status, "satisfied");
+  assert.deepEqual(finalState.openAskIds, []);
+});
+
 test("weak acknowledgements are not treated as implicit acceptance", () => {
   assert.equal(isWeakAcknowledgement("ок"), true);
   assert.equal(isWeakAcknowledgement("спасибо"), true);
   assert.equal(isWeakAcknowledgement("Да, задача закрыта, всё ок"), false);
 });
+
+test("cancel_ask requires manual authority or explicit user provenance", () => {
+  const { state, nextId } = bootstrap("Plan work");
+  const result = applyTaskTrackerAction(
+    state,
+    { action: "cancel_ask", askId: state.openAskIds[0] },
+    createContext(nextId),
+  );
+
+  assert.equal(result.events.length, 0);
+  assert.match(result.message, /manual authority or an explicit sourceMessageId/i);
+});
+
 
 test("start_task updates execution focus", () => {
   const { state, events, nextId } = bootstrap("Plan work");

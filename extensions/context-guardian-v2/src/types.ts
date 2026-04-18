@@ -10,6 +10,7 @@ export const AUTHORITIES = ["authoritative", "proposed", "advisory"] as const;
 export const CONTRACT_CHANGE_KINDS = ["objective", "success_criteria", "constraints"] as const;
 export const CONTRACT_CHANGE_STATUSES = ["open", "accepted", "rejected"] as const;
 export const CONTRACT_ASK_STATUSES = ["open", "satisfied", "cancelled"] as const;
+export const ASK_RESOLUTION_STATUSES = ["satisfied", "cancelled"] as const;
 export const ARTIFACT_KINDS = ["file", "command", "url", "id", "note"] as const;
 export const DONE_REASONS = ["verified_evidence", "user_acceptance", "manual_override"] as const;
 
@@ -25,6 +26,7 @@ export type Authority = (typeof AUTHORITIES)[number];
 export type ContractChangeKind = (typeof CONTRACT_CHANGE_KINDS)[number];
 export type ContractChangeStatus = (typeof CONTRACT_CHANGE_STATUSES)[number];
 export type ContractAskStatus = (typeof CONTRACT_ASK_STATUSES)[number];
+export type AskResolutionStatus = (typeof ASK_RESOLUTION_STATUSES)[number];
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
 export type DoneReason = (typeof DONE_REASONS)[number];
 
@@ -139,6 +141,7 @@ export const ENTRY_TYPES = {
   evidenceAdded: "cg2-evidence-added",
   taskStatusProposed: "cg2-task-status-proposed",
   taskStatusCommitted: "cg2-task-status-committed",
+  askStatusCommitted: "cg2-ask-status-committed",
   taskArchived: "cg2-task-archived",
   executionUpdated: "cg2-execution-updated",
   advisoryStored: "cg2-compaction-advisory",
@@ -191,6 +194,12 @@ export type TaskStatusCommittedPayload = {
   evidenceIds?: string[];
 };
 
+export type AskStatusCommittedPayload = {
+  askId: string;
+  status: AskResolutionStatus;
+  taskId?: string;
+};
+
 export type TaskArchivedPayload = {
   taskId: string;
   reason?: string;
@@ -220,6 +229,7 @@ export type LedgerPayloadMap = {
   [ENTRY_TYPES.evidenceAdded]: EvidenceAddedPayload;
   [ENTRY_TYPES.taskStatusProposed]: TaskStatusProposedPayload;
   [ENTRY_TYPES.taskStatusCommitted]: TaskStatusCommittedPayload;
+  [ENTRY_TYPES.askStatusCommitted]: AskStatusCommittedPayload;
   [ENTRY_TYPES.taskArchived]: TaskArchivedPayload;
   [ENTRY_TYPES.executionUpdated]: ExecutionUpdatedPayload;
   [ENTRY_TYPES.advisoryStored]: AdvisoryStoredPayload;
@@ -267,15 +277,17 @@ export type ProjectedStateSnapshot = {
 
 export type TaskTrackerAction =
   | { action: "list_open" }
+  | { action: "list_open_asks" }
   | { action: "list_archived"; limit?: number }
   | { action: "create_task"; title: string; kind?: TaskKind; parentId?: string; dependsOn?: string[] }
   | { action: "start_task"; taskId: string }
   | { action: "block_task"; taskId: string; reason: string }
   | { action: "await_user"; taskId: string; reason: string }
   | { action: "propose_done"; taskId: string; note?: string }
-  | { action: "commit_done"; taskId: string; reason: DoneReason; evidenceIds?: string[] }
+  | { action: "commit_done"; taskId: string; reason: DoneReason; evidenceIds?: string[]; askIdsToSatisfy?: string[] }
   | { action: "add_evidence"; taskId: string; evidence: TaskEvidenceInput }
   | { action: "record_acceptance"; taskId?: string; note: string; sourceMessageId?: string }
+  | { action: "cancel_ask"; askId: string; sourceMessageId?: string }
   | { action: "propose_contract_change"; kind: ContractChangeKind; proposedValue: string | string[]; reason: string }
   | { action: "set_next_action"; nextAction: string; activeTaskIds?: string[] }
   | { action: "link_file"; taskId: string; path: string }

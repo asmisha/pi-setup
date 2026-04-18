@@ -1,7 +1,6 @@
 import { complete } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@mariozechner/pi-coding-agent";
 import { buildSessionContext, convertToLlm, serializeConversation } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
 import { applyTaskTrackerAction } from "./src/actions.ts";
 import { loadLedgerEvents, serializeEventData, extractAdvisoryFromCompactionDetails } from "./src/branch-store.ts";
 import { buildBootstrapEvents, buildExplicitAskCaptureContract } from "./src/bootstrap.ts";
@@ -14,32 +13,7 @@ import type { CompactionAdvisory, KnownLedgerEvent, ProjectedState, TaskTrackerA
 import { ENTRY_TYPES } from "./src/types.ts";
 import { makeEventMeta, isLowSignalUserNudge } from "./src/utils.ts";
 import { buildTodoWidgetSnapshot, renderTodoWidgetText, type TodoWidgetSnapshot } from "./src/widget.ts";
-
-const TASK_TRACKER_TOOL_PARAMS = Type.Object({
-  action: Type.String(),
-  title: Type.Optional(Type.String()),
-  kind: Type.Optional(Type.String()),
-  parentId: Type.Optional(Type.String()),
-  dependsOn: Type.Optional(Type.Array(Type.String())),
-  taskId: Type.Optional(Type.String()),
-  reason: Type.Optional(Type.String()),
-  note: Type.Optional(Type.String()),
-  evidenceIds: Type.Optional(Type.Array(Type.String())),
-  evidence: Type.Optional(Type.Object({
-    kind: Type.String(),
-    ref: Type.String(),
-    summary: Type.String(),
-    level: Type.Optional(Type.String()),
-    sourceEntryId: Type.Optional(Type.String()),
-  })),
-  sourceMessageId: Type.Optional(Type.String()),
-  proposedValue: Type.Optional(Type.Union([Type.String(), Type.Array(Type.String())])),
-  nextAction: Type.Optional(Type.String()),
-  activeTaskIds: Type.Optional(Type.Array(Type.String())),
-  path: Type.Optional(Type.String()),
-  text: Type.Optional(Type.String()),
-  limit: Type.Optional(Type.Number()),
-}, { additionalProperties: false });
+import { TASK_TRACKER_TOOL_PARAMS } from "./src/tool-schema.ts";
 
 function createIdGenerator() {
   let counter = 0;
@@ -100,8 +74,12 @@ function formatStageLabel(stage: ProjectedState["execution"]["stage"]): string {
   return stage.replace(/_/g, " ");
 }
 
-function pluralize(count: number, singular: string, plural = `${singular}s`): string {
-  return `${count} ${count === 1 ? singular : plural}`;
+function countLabel(count: number, label: string): string {
+  return `${count} ${label}`;
+}
+
+function askCountLabel(count: number): string {
+  return `${count} ${count === 1 ? "ask" : "asks"}`;
 }
 
 function widgetModeColor(mode: TodoWidgetSnapshot["mode"]): "accent" | "warning" | "error" {
@@ -113,34 +91,13 @@ function widgetModeColor(mode: TodoWidgetSnapshot["mode"]): "accent" | "warning"
 function renderSummaryBits(ctx: ExtensionContext, snapshot: TodoWidgetSnapshot): string[] {
   const theme = ctx.ui.theme;
   const bits: string[] = [];
-  if (snapshot.counts.inProgress > 0) bits.push(theme.fg("accent", pluralize(snapshot.counts.inProgress, "active")));
-  if (snapshot.counts.awaitingUser > 0) bits.push(theme.fg("warning", pluralize(snapshot.counts.awaitingUser, "waiting")));
-  if (snapshot.counts.blocked > 0) bits.push(theme.fg("error", pluralize(snapshot.counts.blocked, "blocked")));
-  if (snapshot.counts.open > 0) bits.push(theme.fg("text", pluralize(snapshot.counts.open, "open")));
-  if (snapshot.counts.doneCandidate > 0) bits.push(theme.fg("warning", pluralize(snapshot.counts.doneCandidate, "ready")));
-  if (snapshot.counts.openAsks > 0) bits.push(theme.fg("warning", pluralize(snapshot.counts.openAsks, "ask")));
+  if (snapshot.counts.inProgress > 0) bits.push(theme.fg("accent", countLabel(snapshot.counts.inProgress, "active")));
+  if (snapshot.counts.awaitingUser > 0) bits.push(theme.fg("warning", countLabel(snapshot.counts.awaitingUser, "waiting")));
+  if (snapshot.counts.blocked > 0) bits.push(theme.fg("error", countLabel(snapshot.counts.blocked, "blocked")));
+  if (snapshot.counts.open > 0) bits.push(theme.fg("text", countLabel(snapshot.counts.open, "open")));
+  if (snapshot.counts.doneCandidate > 0) bits.push(theme.fg("warning", countLabel(snapshot.counts.doneCandidate, "ready")));
+  if (snapshot.counts.openAsks > 0) bits.push(theme.fg("warning", askCountLabel(snapshot.counts.openAsks)));
   return bits;
-}
-
-function renderThemedTodoStatus(ctx: ExtensionContext, snapshot: TodoWidgetSnapshot | null): string | null {
-  if (!snapshot) return null;
-
-  const theme = ctx.ui.theme;
-  const modeColor = widgetModeColor(snapshot.mode);
-  const icon = snapshot.mode === "blocked"
-    ? theme.fg("error", "⛔")
-    : snapshot.mode === "waiting"
-      ? theme.fg("warning", "◎")
-      : snapshot.mode === "planning"
-        ? theme.fg("warning", "◌")
-        : theme.fg("accent", "◉");
-  const bits = renderSummaryBits(ctx, snapshot);
-  const pieces = [
-    `${icon} ${theme.fg("accent", "CG2")}`,
-    theme.fg(modeColor, formatStageLabel(snapshot.stage)),
-    ...(bits.length > 0 ? bits : [theme.fg("muted", snapshot.mode)]),
-  ];
-  return pieces.join(` ${theme.fg("dim", "·")} `);
 }
 
 function renderThemedTodoWidgetLines(ctx: ExtensionContext, snapshot: TodoWidgetSnapshot | null): string[] {
@@ -210,7 +167,7 @@ export default function contextGuardianV2(pi: ExtensionAPI) {
   const updateUi = (ctx: ExtensionContext) => {
     if (!ctx.hasUI) return;
     const snapshot = buildTodoWidgetSnapshot(currentState);
-    ctx.ui.setStatus("cg2-todo", renderThemedTodoStatus(ctx, snapshot) ?? undefined);
+    ctx.ui.setStatus("cg2-todo", undefined);
     const widgetLines = renderThemedTodoWidgetLines(ctx, snapshot);
     ctx.ui.setWidget("cg2-todo", widgetLines.length > 0 ? widgetLines : undefined);
   };
@@ -391,6 +348,7 @@ export default function contextGuardianV2(pi: ExtensionAPI) {
     promptGuidelines: [
       "Use this to create or update granular task-tracker events.",
       "Prefer propose_done + evidence + commit_done over directly declaring success.",
+      "If commit_done fully answers an open ask, include askIdsToSatisfy so the ask does not linger open.",
       "Do not treat short acknowledgements as acceptance unless the user was explicit.",
     ],
     parameters: TASK_TRACKER_TOOL_PARAMS as any,

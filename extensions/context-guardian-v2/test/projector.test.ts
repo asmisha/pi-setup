@@ -108,6 +108,70 @@ test("root objective is not closable while open asks or tasks remain", () => {
   assert.ok(closable.reasons.some((reason) => reason.includes("open tasks")));
 });
 
+
+test("root objective becomes closable after done-gated ask satisfaction", () => {
+  const { state, events, nextId } = bootstrap("Finish the work");
+  const rootTaskId = state.openTaskIds[0];
+  const rootAskId = state.openAskIds[0];
+
+  const proposed = applyTaskTrackerAction(state, { action: "propose_done", taskId: rootTaskId }, createContext(nextId));
+  const candidateEvents = [...events, ...proposed.events];
+  const candidateState = projectLedger(candidateEvents);
+
+  const evidence = applyTaskTrackerAction(
+    candidateState,
+    {
+      action: "add_evidence",
+      taskId: rootTaskId,
+      evidence: { kind: "test", ref: "npm test", summary: "All tests passed", level: "verified" },
+    },
+    createContext(nextId),
+  );
+  const withEvidenceEvents = [...candidateEvents, ...evidence.events];
+  const evidenceState = projectLedger(withEvidenceEvents);
+
+  const committed = applyTaskTrackerAction(
+    evidenceState,
+    { action: "commit_done", taskId: rootTaskId, reason: "verified_evidence", askIdsToSatisfy: [rootAskId] },
+    createContext(nextId),
+  );
+  const finalState = projectLedger([...withEvidenceEvents, ...committed.events]);
+  const closable = isRootObjectiveClosable(finalState);
+
+  assert.equal(closable.ok, true);
+});
+
+test("root task done while open asks remain emits a warning", () => {
+  const { state, events, nextId } = bootstrap("Keep root open");
+  const rootTaskId = state.openTaskIds[0];
+
+  const proposed = applyTaskTrackerAction(state, { action: "propose_done", taskId: rootTaskId }, createContext(nextId));
+  const candidateEvents = [...events, ...proposed.events];
+  const candidateState = projectLedger(candidateEvents);
+
+  const evidence = applyTaskTrackerAction(
+    candidateState,
+    {
+      action: "add_evidence",
+      taskId: rootTaskId,
+      evidence: { kind: "test", ref: "npm test", summary: "All tests passed", level: "verified" },
+    },
+    createContext(nextId),
+  );
+  const withEvidenceEvents = [...candidateEvents, ...evidence.events];
+  const evidenceState = projectLedger(withEvidenceEvents);
+
+  const committed = applyTaskTrackerAction(
+    evidenceState,
+    { action: "commit_done", taskId: rootTaskId, reason: "verified_evidence" },
+    createContext(nextId),
+  );
+  const finalState = projectLedger([...withEvidenceEvents, ...committed.events]);
+
+  assert.ok(finalState.warnings.some((warning) => warning.includes("Root task") && warning.includes("root objective remains open")));
+});
+
+
 test("execution.waitingFor=user is normalized away without open asks or awaiting_user tasks", () => {
   const now = "2026-04-18T11:00:00.000Z";
   const state = projectLedger([

@@ -181,6 +181,48 @@ function applyTaskStatusCommit(state: ProjectedState, event: Extract<KnownLedger
   if (event.payload.note) task.notes = normalizeStringList([...task.notes, event.payload.note]);
 }
 
+function applyAskStatusCommit(state: ProjectedState, event: Extract<KnownLedgerEvent, { type: typeof ENTRY_TYPES.askStatusCommitted }>) {
+  if (!state.contract) {
+    pushWarning(state, `Ask status commit ignored for missing contract (${event.payload.askId}).`);
+    return;
+  }
+
+  const ask = state.contract.explicitAsks.find((candidate) => candidate.id === event.payload.askId);
+  if (!ask) {
+    pushWarning(state, `Ask status commit ignored for missing ask ${event.payload.askId}.`);
+    return;
+  }
+  if (ask.status !== "open") {
+    pushWarning(state, `Ask ${ask.id} cannot become ${event.payload.status} from ${ask.status}.`);
+    return;
+  }
+
+  if (event.payload.taskId) {
+    const task = state.tasks[event.payload.taskId];
+    if (!task) {
+      pushWarning(state, `Ask ${ask.id} referenced missing task ${event.payload.taskId}.`);
+      return;
+    }
+    if (event.payload.status === "satisfied" && task.status !== "done") {
+      pushWarning(state, `Ask ${ask.id} cannot be satisfied from task ${task.id} because it is ${task.status}.`);
+      return;
+    }
+  }
+
+  if (event.payload.status === "satisfied" && !event.payload.taskId && event.actor !== "manual" && event.actor !== "user") {
+    pushWarning(state, `Ask ${ask.id} satisfaction requires a linked done task or user/manual authority.`);
+    return;
+  }
+  if (event.payload.status === "cancelled" && event.actor !== "manual" && event.actor !== "user" && !event.sourceMessageId) {
+    pushWarning(state, `Ask ${ask.id} cancellation requires user/manual authority or an explicit sourceMessageId.`);
+    return;
+  }
+
+  ask.status = event.payload.status;
+  ask.closedAt = event.createdAt;
+  state.contract.updatedAt = event.createdAt;
+}
+
 function recomputeDerivedState(state: ProjectedState): ProjectedState {
   state.openAskIds = state.contract
     ? state.contract.explicitAsks.filter((ask) => ask.status === "open").map((ask) => ask.id)
@@ -219,6 +261,16 @@ function recomputeDerivedState(state: ProjectedState): ProjectedState {
   const acceptedProposals = state.contractChangeProposals.filter((proposal) => proposal.status === "accepted");
   if (acceptedProposals.length > 0) {
     pushWarning(state, `Accepted contract proposals still present without materialized contract upsert: ${acceptedProposals.map((item) => item.id).join(", ")}.`);
+  }
+
+  const rootTask = state.contract
+    ? tasks.find((task) => !task.archivedAt && !task.parentId && task.source === "user" && task.title === state.contract?.activeObjective)
+    : null;
+  if (rootTask?.status === "done") {
+    const closable = isRootObjectiveClosable(state);
+    if (!closable.ok) {
+      pushWarning(state, `Root task ${rootTask.id} is done while the root objective remains open: ${closable.reasons.join("; ")}.`);
+    }
   }
 
   return state;
@@ -297,6 +349,14 @@ export function projectLedger(events: KnownLedgerEvent[], now = new Date(0).toIS
           break;
         }
         applyTaskStatusCommit(state, event);
+        break;
+      }
+      case ENTRY_TYPES.askStatusCommitted: {
+        if (event.authority !== "authoritative") {
+          pushWarning(state, `Ignoring non-authoritative askStatusCommitted for ${event.payload.askId}.`);
+          break;
+        }
+        applyAskStatusCommit(state, event);
         break;
       }
       case ENTRY_TYPES.taskArchived: {
