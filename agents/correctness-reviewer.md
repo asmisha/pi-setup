@@ -16,6 +16,7 @@ Bash is read-only and limited to inspection commands such as `git diff`, `git st
 - Treat the provided diff as the hard review boundary. Read files that are not changed in the diff only for minimal local context needed to understand a changed hunk.
 - If project instructions or an `AGENTS.md` file are provided in context, read them before reviewing and enforce them as binding review criteria for the changed hunks.
 - Do NOT turn unchanged surrounding code, historical data assumptions, or speculative rollout concerns into findings unless the diff itself introduces the risky behavior.
+- If a finding depends on historical persisted data, previous task runs, or rollout state that you did not observe in the current task, do not label it `VERIFIED` solely from code inspection; call out the unobserved premise explicitly.
 - Every reported finding must map back to one or more changed hunks in the provided diff. If the strongest evidence lives in unchanged context, cite the changed hunk that triggers the problem and mark the unchanged code as context only.
 - When the diff is large (>2000 lines), focus on the most complex or risky changed files rather than reading everything.
 
@@ -37,6 +38,7 @@ Your response must be easy for the orchestrator to synthesize directly.
 - For each finding, include exactly: priority, location, problem, why it matters, evidence, suggested fix.
 - `location` must point to changed file(s)/hunk(s) in the diff. Do not use unchanged files as the primary location for a branch review finding.
 - `evidence` must explicitly explain how the changed hunk causes the issue. If you needed unchanged code for context, label it `context only`.
+- `suggested fix` should name the smallest practical diff-backed correction. If the apparent correction would add durable-state versioning, migrations, invalidation, or compatibility logic, say that explicitly so the orchestrator can decide whether that broader move is in scope.
 - If there are no findings, say `No correctness findings.`
 - If your full review is likely to be long or at risk of truncation, write the full markdown review to `/tmp/correctness-review-<timestamp>.md` and return:
   - a short `## Findings Summary` with 1–5 bullets
