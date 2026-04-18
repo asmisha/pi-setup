@@ -18,20 +18,6 @@ function optionalArray(itemSchema: JsonSchema, description: string): JsonSchema 
   };
 }
 
-function actionSchema(action: string, required: string[], description: string): JsonSchema {
-  return {
-    properties: {
-      action: {
-        const: action,
-        type: "string",
-        description: `Action: ${action}`,
-      },
-    },
-    required: ["action", ...required],
-    description,
-  };
-}
-
 const ACTIONS = [
   "list_open",
   "list_open_asks",
@@ -50,6 +36,26 @@ const ACTIONS = [
   "link_file",
   "note",
 ] as const;
+
+const ACTION_GUIDE = [
+  "Supported actions and required fields:",
+  "- list_open: no extra fields",
+  "- list_open_asks: no extra fields",
+  "- list_archived: optional limit",
+  "- create_task: title; optional kind, parentId, dependsOn",
+  "- start_task: taskId",
+  "- block_task: taskId, reason",
+  "- await_user: taskId, reason",
+  "- propose_done: taskId; optional note",
+  "- commit_done: taskId, reason; optional evidenceIds, askIdsToSatisfy",
+  "- add_evidence: taskId, evidence",
+  "- record_acceptance: note; optional taskId, sourceMessageId",
+  "- cancel_ask: askId; optional sourceMessageId",
+  "- propose_contract_change: kind, proposedValue, reason",
+  "- set_next_action: nextAction; optional activeTaskIds",
+  "- link_file: taskId, path",
+  "- note: taskId, text",
+].join("\n");
 
 const TaskIdSchema = { type: "string", minLength: 1, description: "Existing task ID from task_tracker state." } as const;
 const AskIdSchema = { type: "string", minLength: 1, description: "Open ask ID from the contract's explicit asks." } as const;
@@ -85,19 +91,23 @@ const EvidenceInputSchema: JsonSchema = {
 export const TASK_TRACKER_TOOL_PARAMS: JsonSchema = {
   type: "object",
   additionalProperties: false,
-  description: "Use one supported task_tracker action. Pick the exact action name and required fields for that action.",
+  description: `Use one supported task_tracker action. Pick the exact action name and required fields for that action.\n\n${ACTION_GUIDE}`,
   properties: {
     action: {
       type: "string",
       enum: [...ACTIONS],
-      description: "Supported task_tracker action.",
+      description: ACTION_GUIDE,
     },
     title: { type: "string", minLength: 1, description: "Concrete task title." },
     kind: TaskKindSchema,
     parentId: TaskIdSchema,
     dependsOn: optionalArray(TaskIdSchema, "Task IDs that must be done first."),
     taskId: TaskIdSchema,
-    reason: { type: "string", minLength: 1, description: "Reason for the action." },
+    reason: {
+      type: "string",
+      minLength: 1,
+      description: "Reason for the action. For commit_done, use one of: verified_evidence, user_acceptance, manual_override.",
+    },
     note: { type: "string", minLength: 1, description: "Optional note or explicit acceptance text." },
     evidenceIds: optionalArray({ type: "string", minLength: 1, description: "Verified evidence ID." }, "Specific verified evidence IDs for the done gate."),
     askIdsToSatisfy: optionalArray(AskIdSchema, "Open ask IDs to close as satisfied in the same done-gated commit."),
@@ -118,22 +128,4 @@ export const TASK_TRACKER_TOOL_PARAMS: JsonSchema = {
     limit: { type: "number", minimum: 1, description: "Maximum number of archived tasks to return." },
   },
   required: ["action"],
-  oneOf: [
-    actionSchema("list_open", [], "List open tasks in the durable tracker."),
-    actionSchema("list_open_asks", [], "List open explicit user asks that still keep the objective open."),
-    actionSchema("list_archived", [], "List archived tasks."),
-    actionSchema("create_task", ["title"], "Create a durable subtask. Prefer a small number of concrete deliverables."),
-    actionSchema("start_task", ["taskId"], "Mark a task in progress and focus execution on it."),
-    actionSchema("block_task", ["taskId", "reason"], "Mark a task blocked."),
-    actionSchema("await_user", ["taskId", "reason"], "Mark a task awaiting user input."),
-    actionSchema("propose_done", ["taskId"], "Move a task to done_candidate before the done gate is closed."),
-    actionSchema("commit_done", ["taskId", "reason"], "Commit a done_candidate task to done after the gate passes. Optionally satisfy matching open asks in the same commit."),
-    actionSchema("add_evidence", ["taskId", "evidence"], "Attach evidence to a task."),
-    actionSchema("record_acceptance", ["note"], "Record explicit user acceptance for a task or the root objective."),
-    actionSchema("cancel_ask", ["askId"], "Cancel an open ask after an explicit user directive or manual intervention."),
-    actionSchema("propose_contract_change", ["kind", "proposedValue", "reason"], "Propose a contract change without mutating the active contract."),
-    actionSchema("set_next_action", ["nextAction"], "Update the current execution next action."),
-    actionSchema("link_file", ["taskId", "path"], "Attach a relevant file path to a task."),
-    actionSchema("note", ["taskId", "text"], "Attach a durable note to a task."),
-  ],
 };

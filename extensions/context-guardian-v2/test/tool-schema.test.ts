@@ -1,22 +1,31 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { TASK_TRACKER_TOOL_PARAMS } from "../src/tool-schema.ts";
 
-const source = readFileSync(new URL("../src/tool-schema.ts", import.meta.url), "utf8");
-
-test("task_tracker schema enumerates supported actions explicitly", () => {
-  assert.match(source, /actionSchema\("list_open"/);
-  assert.match(source, /actionSchema\("list_open_asks"/);
-  assert.match(source, /actionSchema\("create_task"/);
-  assert.match(source, /actionSchema\("commit_done"/);
-  assert.match(source, /actionSchema\("cancel_ask"/);
-  assert.doesNotMatch(source, /Type\.String\(\).*action/);
+test("task_tracker schema stays top-level object without top-level combinators", () => {
+  assert.equal(TASK_TRACKER_TOOL_PARAMS.type, "object");
+  assert.deepEqual(TASK_TRACKER_TOOL_PARAMS.required, ["action"]);
+  assert.equal("oneOf" in TASK_TRACKER_TOOL_PARAMS, false);
+  assert.equal("anyOf" in TASK_TRACKER_TOOL_PARAMS, false);
+  assert.equal("allOf" in TASK_TRACKER_TOOL_PARAMS, false);
+  assert.equal("enum" in TASK_TRACKER_TOOL_PARAMS, false);
+  assert.equal("not" in TASK_TRACKER_TOOL_PARAMS, false);
 });
 
-test("commit_done schema exposes typed done reasons and ask closure", () => {
-  assert.match(source, /DoneReasonSchema/);
-  assert.match(source, /askIdsToSatisfy/);
-  assert.match(source, /manual_override/);
-  assert.match(source, /verified_evidence/);
-  assert.match(source, /user_acceptance/);
+test("task_tracker schema enumerates supported actions and typed fields", () => {
+  const properties = TASK_TRACKER_TOOL_PARAMS.properties as Record<string, any>;
+  assert.deepEqual(properties.action.enum.slice(0, 5), [
+    "list_open",
+    "list_open_asks",
+    "list_archived",
+    "create_task",
+    "start_task",
+  ]);
+  assert.ok(properties.action.enum.includes("commit_done"));
+  assert.ok(properties.action.enum.includes("cancel_ask"));
+  assert.match(properties.reason.description, /verified_evidence/);
+  assert.match(properties.reason.description, /user_acceptance/);
+  assert.match(properties.reason.description, /manual_override/);
+  assert.equal(properties.askIdsToSatisfy.type, "array");
+  assert.equal(properties.evidence.type, "object");
 });
