@@ -71,19 +71,21 @@ Write a short 2-5 bullet summary of what the change does based on the stat and f
 Reuse the normal PR review structure:
 
 - use the prepared worktree and merge-base diff
+- before launching any pass-1 broad reviewers, spawn one `scout` subagent with the diff file path, diff stat, changed-file list, short summary, and review worktree cwd
+- instruct the scout to inspect the diff and enough nearby code to understand the changed surfaces, categorize the main risk areas, identify suspicious interactions, and recommend whether pass 1 needs **0–6** extra targeted reviewers beyond the core four
 - always include the same four core reviewers that `code-review` uses:
   - `correctness-reviewer`
   - `security-reviewer`
   - `performance-reviewer`
   - `simplicity-reviewer`
-- before launching pass 1, make a scope-based coverage plan and decide whether to add **0–6** extra targeted reviewers, staying at **10 total broad review subagents max** for the pass
+- after the scout returns, make the pass-1 coverage plan and decide whether to add **0–6** extra targeted reviewers, staying at **10 total broad review subagents max** for the pass
 - choose extra reviewers from the available subagent list only when they materially improve coverage for this PR; if a needed specialty is unavailable, use `worker` with a sharply scoped specialty brief
 - optimize for distinct risk coverage, not duplicate broad passes; each extra reviewer must own a different investigation angle
 - common reasons to add extras include migrations/data integrity, API contracts, auth/permissions, frontend/accessibility, background jobs/concurrency, infra/observability, rollout/flags, or another clear domain-specific surface
 - keep the review evidence-backed and priority-ordered
 - do not run tests, builds, or linters unless the user separately asks for verification
 
-Treat this as the baseline PR review pass. The reviewers should investigate the changes normally, with no special second-pass guidance yet. If the core four are already sufficient, explicitly say no extra pass-1 reviewers were needed.
+Treat this scout as a coverage-planning step, not as the actual review result. The pass-1 reviewers should still investigate the changes normally, with no special second-pass guidance yet. If the scout shows the core four are already sufficient, explicitly say no extra pass-1 reviewers were needed.
 
 After synthesizing the first-pass findings, do **not** stop for user discussion yet. In this skill, the pause happens only after both review cycles are complete.
 
@@ -147,7 +149,9 @@ Prefer a `worker` subagent for this step unless the environment has a more speci
 
 ### 6. Run the second review cycle with the brief as guidance, not truth
 
-Run the same four core reviewers again in parallel against the same diff file and same worktree. Then re-evaluate whether pass 2 needs the same extra reviewers, a different set of extra reviewers, or no extras at all; stay at **10 total broad review subagents max** for the pass.
+Before launching any pass-2 broad reviewers, spawn one more `scout` subagent with the diff file path, changed-file list, short summary, second-pass review brief path, and review worktree cwd. Instruct it to inspect the diff and nearby code again, use the second-pass brief as guidance rather than truth, and recommend whether pass 2 needs the same extra reviewers, a different set of extra reviewers, or no extras at all.
+
+Then run the same four core reviewers again in parallel against the same diff file and same worktree. Use that second scout pass to choose pass-2 extras, staying at **10 total broad review subagents max** for the pass.
 
 Give each reviewer:
 

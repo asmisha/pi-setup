@@ -18,9 +18,10 @@ Use this skill when the main artifact is a document, but the review must stay gr
    - Read enough nearby code to understand how the proposed design fits the current system.
 
 3. **Run specialist passes**
-   - Use `scout` for codebase mapping if the surface area is large.
+   - If you plan to launch multiple review subagents, run one `scout` pass first. Give it the document, the mapped code surface, and the current branch context so it can inspect the subject and recommend the right review coverage.
+   - Use `scout` for codebase mapping whenever the surface area is large or the affected boundaries are not obvious.
    - Always include `spec-reviewer`.
-   - Then make an explicit coverage plan for the document's actual scope and decide which other reviewers to launch.
+   - Then make an explicit coverage plan for the document's actual scope and decide which other reviewers to launch, using the scout output and your mapping rather than file names or assumptions alone.
    - Add `security-reviewer`, `performance-reviewer`, `simplicity-reviewer`, and/or other targeted reviewers only when they materially improve coverage for this spec.
    - You may launch up to **10 total review subagents**. Keep the set small when the spec is narrow, and expand it when the surface area genuinely warrants it.
    - Choose extra reviewers from the available subagent list when possible; if a needed specialty does not exist, use `worker` with a sharply scoped specialty brief.

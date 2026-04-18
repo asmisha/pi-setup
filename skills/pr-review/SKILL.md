@@ -87,7 +87,8 @@ Load and follow the `code-review` skill.
 Important:
 
 - Review against the merge base with the PR base branch.
-- Preserve the `code-review` skill's fixed four core reviewers, but also make an explicit scope-based decision about whether to add extra targeted reviewers for this PR.
+- Require the `code-review` skill's single `scout` coverage pass to finish before any broad review subagents are launched.
+- Preserve the `code-review` skill's fixed four core reviewers, but make the extra-reviewer decision only after that scout has inspected the diff and nearby code.
 - Add **0–6** extra reviewers when they materially improve coverage, staying at **10 total broad review subagents max**.
 - Choose extra reviewers from the available agent list when possible; if a needed specialty does not exist, use `worker` with a precise specialty brief.
 - Optimize for coverage and comprehensiveness, not redundant broad passes.

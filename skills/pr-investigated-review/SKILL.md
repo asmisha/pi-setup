@@ -87,6 +87,8 @@ Also write a short 2-5 bullet summary of what the change does based on the stat 
 
 Do not load `code-review` directly for this skill. Reuse its four core specialist reviewers, expand with extra targeted reviewers when the PR scope warrants it, and require verification of each candidate issue before it becomes a finding.
 
+Before launching any pass-1 broad reviewers, spawn one `scout` subagent with the diff file path, diff stat, changed-file list, short summary, and review worktree cwd. Instruct it to inspect the diff and enough nearby code to understand the changed surfaces, categorize the main risk areas, identify suspicious interactions, and recommend whether pass 1 needs **0–6** extra targeted reviewers beyond the core four.
+
 Always include these four first-pass core reviewers in parallel:
 
 - `correctness-reviewer`
@@ -94,14 +96,14 @@ Always include these four first-pass core reviewers in parallel:
 - `performance-reviewer`
 - `simplicity-reviewer`
 
-Before launching pass 1, make a scope-based coverage plan from the diff stat, changed-file list, and short summary:
+After the scout returns, make the pass-1 coverage plan from the scout output, diff stat, changed-file list, and short summary:
 
 - decide whether to add **0–6** extra targeted reviewers, staying at **10 total broad review subagents max** for the pass
 - choose extra reviewers from the available subagent list only when they materially improve coverage for this PR
 - if a suitable named specialist does not exist, use `worker` with a sharply scoped specialty brief
 - optimize for distinct risk coverage, not redundant overlap; each extra reviewer must own a different investigation angle
 - common reasons to add extras include migrations/data integrity, API contracts, auth/permissions, frontend/accessibility, background jobs/concurrency, infra/observability, rollout/flags, or another clearly specialized domain surface
-- if the core four already cover the PR well, explicitly say no extra pass-1 reviewers are needed
+- if the scout shows the core four already cover the PR well, explicitly say no extra pass-1 reviewers are needed
 
 Give each first-pass reviewer:
 
@@ -191,7 +193,9 @@ Prefer a `worker` subagent for this step unless the environment has a more speci
 
 ### 6. Run pass 2 with the brief as guidance, not truth
 
-Run the same four core reviewers again in parallel against the same diff file and same worktree, then re-evaluate whether pass 2 needs the same extra reviewers, a different set of extra reviewers, or no extras at all. Stay at **10 total broad review subagents max** for the pass.
+Before launching any pass-2 broad reviewers, spawn one more `scout` subagent with the diff file path, changed-file list, short summary, second-pass review brief path, and review worktree cwd. Instruct it to inspect the diff and nearby code again, use the second-pass brief as guidance rather than truth, and recommend whether pass 2 needs the same extra reviewers, a different set of extra reviewers, or no extras at all.
+
+Run the same four core reviewers again in parallel against the same diff file and same worktree, then use that second scout pass to choose pass-2 extras. Stay at **10 total broad review subagents max** for the pass.
 
 Give each second-pass reviewer:
 

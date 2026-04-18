@@ -21,10 +21,29 @@ Use this skill when the goal is to find real problems in code changes, not to ru
   git diff --name-only $BASE..HEAD | head -n 200
   ```
 - Write a **2–5 bullet summary** of what the change does based on the stat and file list.
-- **Do NOT** read source files or the diff content yourself. The subagents will do that.
+- **Do NOT** do a broad source review yourself. After you prepare the diff, the next inspection step must be a single `scout` subagent pass.
 - **Do NOT** run tests, linters, or builds. This is a code review, not verification.
 
-### 2. Delegate to specialist reviewers immediately
+### 2. Run one scout coverage pass before broad reviewer fan-out
+
+Before launching the core reviewers or any extra targeted reviewers, spawn exactly one `scout` subagent.
+
+Give the scout:
+- The path to the diff file on disk (e.g., `/tmp/branch-review.diff`)
+- The diff stat and changed-file list
+- Your 2–5 bullet summary of the change
+- The working directory / cwd
+
+Explicitly instruct the scout to:
+- inspect the diff content and enough nearby code to understand the changed surfaces
+- identify the main code paths, subsystems, and interaction boundaries affected by the change
+- call out suspicious or high-risk areas that deserve specialist attention
+- recommend whether the review needs **0–6** extra targeted reviewers beyond the four core reviewers, and if so which distinct specialties are warranted
+- return a concise coverage plan that helps the orchestrator choose reviewers without turning unverified suspicions into findings
+
+The scout is not a substitute for the real review pass. Its job is to make reviewer selection and prompt scoping informed.
+
+### 3. Delegate to specialist reviewers using the scout coverage plan
 
 Always include these **four core reviewers** in a single parallel subagent call:
 - `correctness-reviewer`
@@ -32,12 +51,12 @@ Always include these **four core reviewers** in a single parallel subagent call:
 - `performance-reviewer`
 - `simplicity-reviewer`
 
-Before you launch reviewers, make a fast coverage plan from only the diff stat, changed-file list, and your 2–5 bullet summary:
+Before you launch reviewers, make a coverage plan from the scout output, diff stat, changed-file list, and your 2–5 bullet summary:
 - Decide whether this review also needs **0–6 additional targeted reviewers**, staying at **10 total broad review subagents max**.
 - Choose extra reviewers from the available subagent list only when they materially improve coverage for this specific change.
 - Optimize for distinct risk coverage, not redundant overlap. Each extra reviewer must own a different investigation angle.
 - If a suitable named specialist is not available, use `worker` with a sharply scoped specialty brief instead of skipping that risk area.
-- If the change is narrow and the core four already cover it well, explicitly say no extra reviewers are needed.
+- If the scout shows the change is narrow and the core four already cover it well, explicitly say no extra reviewers are needed.
 
 Common triggers for extra reviewers include:
 - database migrations, data backfills, transactions, caching, or data model changes
@@ -54,15 +73,15 @@ Give each subagent:
 - A brief summary of the change (2–5 bullets)
 - The working directory / cwd
 
-For each extra reviewer, explicitly say why it was chosen and what non-overlapping risk surface it owns.
+For each extra reviewer, explicitly say why it was chosen, what non-overlapping risk surface it owns, and which scout-identified area or interaction motivated that choice.
 
-**Do NOT** include diff content, file contents, or your own analysis in the task text.
+**Do NOT** include diff content, file contents, or unverified scout conclusions in the task text.
 **Do NOT** use the generic `reviewer` agent as a redundant broad pass or as a substitute for the core four. Extra reviewers must be narrowly targeted specialists.
 - In each subagent task, explicitly require a concise final answer that the orchestrator can synthesize directly: priority, file/line, issue, impact.
 - If a reviewer expects a long output or risks truncation, have it write the full findings to a temp file and return a short summary plus the file path in the same first pass.
 - If one reviewer response comes back truncated or incomplete, recover that reviewer’s findings from its returned temp-file path instead of launching a second broad review pass or re-reviewing the diff yourself.
 
-### 3. Synthesize without losing issues
+### 4. Synthesize without losing issues
 
 - Merge findings from the core reviewers and any extra targeted reviewers you launched.
 - Deduplicate only true duplicates (same file, same line, same issue).
@@ -72,7 +91,7 @@ For each extra reviewer, explicitly say why it was chosen and what non-overlappi
 - If a reviewer returned a temp-file path for full findings, read that file and synthesize from it.
 - If a reviewer response is partial, missing detail, or truncated, recover the missing details from that reviewer’s first-pass artifact/path before doing any new analysis yourself.
 
-### 4. Cite evidence and impact
+### 5. Cite evidence and impact
 
 - Each issue should include file path, line number or hunk, why it matters, and the concrete failure or maintenance risk.
 - Prefer evidence-backed findings over speculative concerns.
@@ -83,7 +102,7 @@ For each extra reviewer, explicitly say why it was chosen and what non-overlappi
 
 ## Token efficiency rules
 
-- The orchestrator should make **≤ 6 tool calls** before spawning broad reviewers: get diff stat, save diff to file, get file list, optionally list available agents once, then spawn reviewers.
+- The orchestrator should make **≤ 6 tool calls** before spawning broad reviewers: get diff stat, save diff to file, get file list, optionally list available agents once, then spawn the scout and reviewers.
 - Do not pre-read files the subagents will read. Subagents have their own context windows.
 - Do not embed large content in subagent task descriptions. Pass file paths plus only the short summary and targeted scope rationale.
 
