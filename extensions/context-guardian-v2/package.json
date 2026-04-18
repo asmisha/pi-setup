@@ -1,0 +1,8 @@
+{
+  "name": "context-guardian-v2-local",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --experimental-strip-types test/*.test.ts"
+  }
+}
