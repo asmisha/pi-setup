@@ -13,7 +13,7 @@ import { renderActiveWorkPacket } from "./src/prompt.ts";
 import type { CompactionAdvisory, KnownLedgerEvent, ProjectedState, TaskTrackerAction } from "./src/types.ts";
 import { ENTRY_TYPES } from "./src/types.ts";
 import { makeEventMeta, isLowSignalUserNudge } from "./src/utils.ts";
-import { buildTodoWidgetSnapshot, renderTodoStatusText, renderTodoWidgetText } from "./src/widget.ts";
+import { buildTodoWidgetSnapshot, renderTodoWidgetText, type TodoWidgetSnapshot } from "./src/widget.ts";
 
 const TASK_TRACKER_TOOL_PARAMS = Type.Object({
   action: Type.String(),
@@ -96,6 +96,98 @@ function extractFilePaths(fileOps: unknown): string[] {
   return [...new Set(paths)];
 }
 
+function formatStageLabel(stage: ProjectedState["execution"]["stage"]): string {
+  return stage.replace(/_/g, " ");
+}
+
+function pluralize(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function widgetModeColor(mode: TodoWidgetSnapshot["mode"]): "accent" | "warning" | "error" {
+  if (mode === "blocked") return "error";
+  if (mode === "planning" || mode === "waiting") return "warning";
+  return "accent";
+}
+
+function renderSummaryBits(ctx: ExtensionContext, snapshot: TodoWidgetSnapshot): string[] {
+  const theme = ctx.ui.theme;
+  const bits: string[] = [];
+  if (snapshot.counts.inProgress > 0) bits.push(theme.fg("accent", pluralize(snapshot.counts.inProgress, "active")));
+  if (snapshot.counts.awaitingUser > 0) bits.push(theme.fg("warning", pluralize(snapshot.counts.awaitingUser, "waiting")));
+  if (snapshot.counts.blocked > 0) bits.push(theme.fg("error", pluralize(snapshot.counts.blocked, "blocked")));
+  if (snapshot.counts.open > 0) bits.push(theme.fg("text", pluralize(snapshot.counts.open, "open")));
+  if (snapshot.counts.doneCandidate > 0) bits.push(theme.fg("warning", pluralize(snapshot.counts.doneCandidate, "ready")));
+  if (snapshot.counts.openAsks > 0) bits.push(theme.fg("warning", pluralize(snapshot.counts.openAsks, "ask")));
+  return bits;
+}
+
+function renderThemedTodoStatus(ctx: ExtensionContext, snapshot: TodoWidgetSnapshot | null): string | null {
+  if (!snapshot) return null;
+
+  const theme = ctx.ui.theme;
+  const modeColor = widgetModeColor(snapshot.mode);
+  const icon = snapshot.mode === "blocked"
+    ? theme.fg("error", "⛔")
+    : snapshot.mode === "waiting"
+      ? theme.fg("warning", "◎")
+      : snapshot.mode === "planning"
+        ? theme.fg("warning", "◌")
+        : theme.fg("accent", "◉");
+  const bits = renderSummaryBits(ctx, snapshot);
+  const pieces = [
+    `${icon} ${theme.fg("accent", "CG2")}`,
+    theme.fg(modeColor, formatStageLabel(snapshot.stage)),
+    ...(bits.length > 0 ? bits : [theme.fg("muted", snapshot.mode)]),
+  ];
+  return pieces.join(` ${theme.fg("dim", "·")} `);
+}
+
+function renderThemedTodoWidgetLines(ctx: ExtensionContext, snapshot: TodoWidgetSnapshot | null): string[] {
+  if (!snapshot) return [];
+
+  const theme = ctx.ui.theme;
+  const modeColor = widgetModeColor(snapshot.mode);
+  const rawLines = renderTodoWidgetText(snapshot);
+  if (rawLines.length === 0) return [];
+
+  const summaryBits = renderSummaryBits(ctx, snapshot);
+  const badge = theme.bg("selectedBg", theme.fg("accent", " CG2 "));
+  const header = `${badge} ${theme.fg(modeColor, theme.bold(formatStageLabel(snapshot.stage)))}${summaryBits.length > 0 ? ` ${theme.fg("dim", "·")} ${summaryBits.join(` ${theme.fg("dim", "·")} `)}` : ""}`;
+
+  return rawLines.map((line, index) => {
+    if (index === 0) return header;
+    if (line.startsWith("Hint: ")) {
+      return `${theme.fg("warning", "✦")} ${theme.fg("muted", theme.italic(line.slice("Hint: ".length)))}`;
+    }
+    if (line.startsWith("Next: ")) {
+      return `${theme.fg("dim", "└")}${theme.fg("accent", " next")} ${theme.fg("muted", line.slice("Next: ".length))}`;
+    }
+    if (line.startsWith("Ask: ")) {
+      return `${theme.fg("dim", "└")}${theme.fg("warning", " ask ")} ${theme.fg("muted", line.slice("Ask: ".length))}`;
+    }
+    if (line.startsWith("+")) {
+      return `${theme.fg("dim", "… ")}${theme.fg("dim", line)}`;
+    }
+    if (line.startsWith("→ ")) {
+      return `${theme.fg("dim", "│")} ${theme.fg("accent", "→")} ${theme.fg("accent", theme.bold(line.slice(2)))}`;
+    }
+    if (line.startsWith("⛔ ")) {
+      return `${theme.fg("dim", "│")} ${theme.fg("error", "⛔")} ${theme.fg("error", line.slice(2))}`;
+    }
+    if (line.startsWith("? ")) {
+      return `${theme.fg("dim", "│")} ${theme.fg("warning", "?")} ${theme.fg("warning", line.slice(2))}`;
+    }
+    if (line.startsWith("◇ ")) {
+      return `${theme.fg("dim", "│")} ${theme.fg("warning", "◇")} ${theme.fg("warning", line.slice(2))}`;
+    }
+    if (line.startsWith("• ")) {
+      return `${theme.fg("dim", "│")} ${theme.fg("muted", "•")} ${line.slice(2)}`;
+    }
+    return line;
+  });
+}
+
 export default function contextGuardianV2(pi: ExtensionAPI) {
   if (!isExtensionEnabled()) {
     return;
@@ -118,8 +210,8 @@ export default function contextGuardianV2(pi: ExtensionAPI) {
   const updateUi = (ctx: ExtensionContext) => {
     if (!ctx.hasUI) return;
     const snapshot = buildTodoWidgetSnapshot(currentState);
-    ctx.ui.setStatus("cg2-todo", renderTodoStatusText(snapshot) ?? undefined);
-    const widgetLines = renderTodoWidgetText(snapshot);
+    ctx.ui.setStatus("cg2-todo", renderThemedTodoStatus(ctx, snapshot) ?? undefined);
+    const widgetLines = renderThemedTodoWidgetLines(ctx, snapshot);
     ctx.ui.setWidget("cg2-todo", widgetLines.length > 0 ? widgetLines : undefined);
   };
 
@@ -194,7 +286,7 @@ export default function contextGuardianV2(pi: ExtensionAPI) {
     };
   });
 
-  pi.on("turn_end", async (_event, ctx) => {
+  pi.on("turn_end", async (event, ctx) => {
     const usage = ctx.getContextUsage();
     const currentPercent = usage?.percent ?? null;
     if (currentPercent === null) {
@@ -210,6 +302,8 @@ export default function contextGuardianV2(pi: ExtensionAPI) {
     if (compactionInFlight) return;
     if (Date.now() - lastCompactionAt < MIN_COMPACTION_INTERVAL_MS) return;
 
+    const shouldAutoResume = Array.isArray(event.toolResults) && event.toolResults.length > 0;
+
     compactionInFlight = true;
     ctx.compact({
       customInstructions: "Generate an advisory packet for Context Guardian v2. Keep contract/task truth separate from advisory.",
@@ -217,6 +311,9 @@ export default function contextGuardianV2(pi: ExtensionAPI) {
         compactionInFlight = false;
         lastCompactionAt = Date.now();
         previousContextPercent = null;
+        if (shouldAutoResume) {
+          pi.sendUserMessage("continue");
+        }
       },
       onError: () => {
         compactionInFlight = false;

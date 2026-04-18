@@ -109,5 +109,7 @@ test("rendered work packet includes hard rules and excludes archived task text",
 
   const rendered = renderActiveWorkPacket(nextState);
   assert.match(rendered, /done_candidate != done/i);
+  assert.match(rendered, /use task_tracker to create explicit subtasks/i);
+  assert.match(rendered, /update task_tracker instead of only narrating progress/i);
   assert.doesNotMatch(rendered, new RegExp(rootTaskId));
 });

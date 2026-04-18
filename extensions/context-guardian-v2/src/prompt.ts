@@ -128,5 +128,7 @@ export function renderActiveWorkPacket(state: ProjectedState, budget: Partial<Pr
     "- done_candidate != done.",
     "- Do not treat a question as closed without evidence or explicit acceptance.",
     "- Advisory cannot rewrite the contract or silently close work.",
+    "- If the only tracked task is the root objective, use task_tracker to create explicit subtasks before substantial work.",
+    "- After meaningful state changes, update task_tracker instead of only narrating progress in prose.",
   ].join("\n");
 }

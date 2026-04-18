@@ -8,11 +8,11 @@ export type TodoWidgetTaskRow = {
   title: string;
   status: TaskStatus;
   active: boolean;
+  detail: string | null;
 };
 
 export type TodoWidgetSnapshot = {
   mode: TodoWidgetMode;
-  objective: string | null;
   stage: ProjectedState["execution"]["stage"];
   counts: {
     open: number;
@@ -25,16 +25,18 @@ export type TodoWidgetSnapshot = {
   tasks: TodoWidgetTaskRow[];
   latestAsk: string | null;
   nextAction: string | null;
+  hiddenTaskCount: number;
   note?: string;
 };
 
-const DEFAULT_MAX_TASKS = 3;
+const DEFAULT_MAX_TASKS = 4;
 const MAX_TITLE_LENGTH = 88;
 const MAX_HINT_LENGTH = 104;
+const MAX_TASK_LINE_LENGTH = 116;
 
 const STATUS_PRIORITY: Record<TaskStatus, number> = {
-  in_progress: 0,
-  blocked: 1,
+  blocked: 0,
+  in_progress: 1,
   awaiting_user: 2,
   todo: 3,
   done_candidate: 4,
@@ -48,6 +50,14 @@ function clip(text: string, maxLength: number): string {
   return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
+function formatStage(stage: ProjectedState["execution"]["stage"]): string {
+  return stage.replace(/_/g, " ");
+}
+
+function pluralize(count: number, singular: string, plural = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
 function isRootObjectiveTask(state: ProjectedState, task: TaskItem): boolean {
   const objective = state.contract?.activeObjective?.trim();
   if (!objective) return false;
@@ -57,11 +67,13 @@ function isRootObjectiveTask(state: ProjectedState, task: TaskItem): boolean {
 function sortTasks(tasks: TaskItem[], activeTaskIds: string[]): TaskItem[] {
   const active = new Set(activeTaskIds);
   return [...tasks].sort((left, right) => {
+    const byPriority = STATUS_PRIORITY[left.status] - STATUS_PRIORITY[right.status];
+    if (byPriority !== 0) return byPriority;
+
     const leftActive = active.has(left.id) ? 1 : 0;
     const rightActive = active.has(right.id) ? 1 : 0;
     if (leftActive !== rightActive) return rightActive - leftActive;
-    const byPriority = STATUS_PRIORITY[left.status] - STATUS_PRIORITY[right.status];
-    if (byPriority !== 0) return byPriority;
+
     return Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
   });
 }
@@ -72,31 +84,65 @@ function latestOpenAskText(state: ProjectedState): string | null {
   return latest ? clip(latest, MAX_HINT_LENGTH) : null;
 }
 
+function stripKnownPrefix(value: string | null | undefined, prefix: RegExp): string | null {
+  if (!value) return null;
+  return value.replace(prefix, "").trim() || null;
+}
+
+function taskDetail(task: TaskItem): string | null {
+  if (task.status === "blocked") {
+    return stripKnownPrefix(task.blockingReason, /^blocked:\s*/i) ?? "blocked";
+  }
+  if (task.status === "awaiting_user") {
+    return stripKnownPrefix(task.waitingReason, /^awaiting user:\s*/i) ?? "needs user input";
+  }
+  if (task.status === "done_candidate") {
+    return "needs evidence or explicit acceptance";
+  }
+  return null;
+}
+
 function summarizeMode(snapshot: TodoWidgetSnapshot): string {
   switch (snapshot.mode) {
     case "planning":
-      return "planning";
+      return snapshot.counts.openAsks > 0 ? `planning · ${pluralize(snapshot.counts.openAsks, "ask")}` : "planning";
     case "waiting":
-      return `waiting on user · ${snapshot.counts.open} open`;
+      return `waiting on user · ${pluralize(snapshot.counts.open, "open")}`;
     case "blocked":
-      return `blocked · ${snapshot.counts.open} open`;
+      return `blocked · ${pluralize(snapshot.counts.open, "open")}`;
     case "active": {
       const parts: string[] = [];
-      if (snapshot.counts.inProgress > 0) parts.push(`${snapshot.counts.inProgress} active`);
-      if (snapshot.counts.open > 0) parts.push(`${snapshot.counts.open} open`);
-      if (snapshot.counts.doneCandidate > 0) parts.push(`${snapshot.counts.doneCandidate} ready`);
-      if (snapshot.counts.openAsks > 0) parts.push(`${snapshot.counts.openAsks} asks`);
+      if (snapshot.counts.inProgress > 0) parts.push(pluralize(snapshot.counts.inProgress, "active"));
+      if (snapshot.counts.open > 0) parts.push(pluralize(snapshot.counts.open, "open"));
+      if (snapshot.counts.doneCandidate > 0) parts.push(pluralize(snapshot.counts.doneCandidate, "ready"));
+      if (snapshot.counts.openAsks > 0) parts.push(pluralize(snapshot.counts.openAsks, "ask"));
       return parts.join(" · ") || "active";
     }
   }
 }
 
+function buildSummaryBits(snapshot: TodoWidgetSnapshot): string[] {
+  const bits: string[] = [];
+  if (snapshot.counts.inProgress > 0) bits.push(pluralize(snapshot.counts.inProgress, "active"));
+  if (snapshot.counts.awaitingUser > 0) bits.push(pluralize(snapshot.counts.awaitingUser, "waiting"));
+  if (snapshot.counts.blocked > 0) bits.push(pluralize(snapshot.counts.blocked, "blocked"));
+  if (snapshot.counts.open > 0) bits.push(pluralize(snapshot.counts.open, "open"));
+  if (snapshot.counts.doneCandidate > 0) bits.push(pluralize(snapshot.counts.doneCandidate, "ready"));
+  if (snapshot.counts.openAsks > 0) bits.push(pluralize(snapshot.counts.openAsks, "ask"));
+  return bits;
+}
+
 function taskPrefix(task: TodoWidgetTaskRow): string {
-  if (task.status === "done_candidate") return "✓";
+  if (task.status === "done_candidate") return "◇";
   if (task.status === "blocked") return "⛔";
   if (task.status === "awaiting_user") return "?";
   if (task.active || task.status === "in_progress") return "→";
   return "•";
+}
+
+function renderTaskLine(task: TodoWidgetTaskRow): string {
+  const suffix = task.detail ? ` — ${task.detail}` : "";
+  return clip(`${taskPrefix(task)} ${task.title}${suffix}`, MAX_TASK_LINE_LENGTH);
 }
 
 export function buildTodoWidgetSnapshot(state: ProjectedState, options?: { maxTasks?: number }): TodoWidgetSnapshot | null {
@@ -108,6 +154,7 @@ export function buildTodoWidgetSnapshot(state: ProjectedState, options?: { maxTa
 
   const visibleOpenTasks = allOpenTasks.filter((task) => !isRootObjectiveTask(state, task));
   const visibleDoneCandidates = allDoneCandidates.filter((task) => !isRootObjectiveTask(state, task));
+  const allVisibleTasks = [...visibleOpenTasks, ...visibleDoneCandidates];
 
   const rootOnly = visibleOpenTasks.length === 0 && visibleDoneCandidates.length === 0 && (allOpenTasks.length > 0 || allDoneCandidates.length > 0);
   const openCount = visibleOpenTasks.length;
@@ -131,21 +178,18 @@ export function buildTodoWidgetSnapshot(state: ProjectedState, options?: { maxTa
     mode = "active";
   }
 
-  const selectedTasks = [
-    ...visibleOpenTasks.slice(0, maxTasks),
-    ...visibleDoneCandidates.slice(0, Math.max(0, maxTasks - Math.min(maxTasks, visibleOpenTasks.length))),
-  ]
+  const selectedTasks = allVisibleTasks
     .slice(0, maxTasks)
     .map((task) => ({
       id: task.id,
       title: clip(task.title, MAX_TITLE_LENGTH),
       status: task.status,
       active: state.execution.activeTaskIds.includes(task.id),
+      detail: taskDetail(task),
     }));
 
   return {
     mode,
-    objective: state.contract?.activeObjective ?? null,
     stage: state.execution.stage,
     counts: {
       open: openCount,
@@ -158,7 +202,8 @@ export function buildTodoWidgetSnapshot(state: ProjectedState, options?: { maxTa
     tasks: selectedTasks,
     latestAsk: latestOpenAskText(state),
     nextAction: state.execution.nextAction ? clip(state.execution.nextAction, MAX_HINT_LENGTH) : null,
-    ...(rootOnly ? { note: "No explicit subtasks yet." } : {}),
+    hiddenTaskCount: Math.max(0, allVisibleTasks.length - selectedTasks.length),
+    ...(rootOnly ? { note: "Hint: break this into explicit subtasks." } : {}),
   };
 }
 
@@ -170,25 +215,27 @@ export function renderTodoStatusText(snapshot: TodoWidgetSnapshot | null): strin
 export function renderTodoWidgetText(snapshot: TodoWidgetSnapshot | null): string[] {
   if (!snapshot) return [];
 
-  const summaryBits: string[] = [];
-  if (snapshot.counts.open > 0) summaryBits.push(`${snapshot.counts.open} open`);
-  if (snapshot.counts.doneCandidate > 0) summaryBits.push(`${snapshot.counts.doneCandidate} ready`);
-  if (snapshot.counts.openAsks > 0) summaryBits.push(`${snapshot.counts.openAsks} asks`);
-  if (summaryBits.length === 0) summaryBits.push(snapshot.mode === "planning" ? "getting started" : snapshot.mode);
+  const summaryBits = buildSummaryBits(snapshot);
+  const lines: string[] = [
+    `CG2 ${formatStage(snapshot.stage)} · ${summaryBits.join(" · ") || (snapshot.mode === "planning" ? "getting started" : snapshot.mode)}`,
+  ];
 
-  const lines: string[] = [`CG2 ${snapshot.stage} — ${summaryBits.join(" · ")}`];
+  if (snapshot.latestAsk) {
+    lines.push(`Ask: ${snapshot.latestAsk}`);
+  }
+
   if (snapshot.note) lines.push(snapshot.note);
 
   for (const task of snapshot.tasks) {
-    lines.push(`${taskPrefix(task)} ${task.title}`);
+    lines.push(renderTaskLine(task));
   }
 
-  if (snapshot.nextAction && lines.length < 5) {
+  if (snapshot.nextAction && snapshot.tasks.length > 0 && lines.length < 7) {
     lines.push(`Next: ${snapshot.nextAction}`);
   }
 
-  if (snapshot.latestAsk && lines.length < 6 && (snapshot.mode === "planning" || snapshot.mode === "waiting")) {
-    lines.push(`Ask: ${snapshot.latestAsk}`);
+  if (snapshot.hiddenTaskCount > 0 && lines.length < 8) {
+    lines.push(`+${snapshot.hiddenTaskCount} more ${snapshot.hiddenTaskCount === 1 ? "task" : "tasks"}`);
   }
 
   return lines;

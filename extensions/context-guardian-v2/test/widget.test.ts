@@ -11,12 +11,14 @@ test("widget shows planning state before explicit subtasks exist", () => {
   const snapshot = buildTodoWidgetSnapshot(state);
   assert(snapshot);
   assert.equal(snapshot.mode, "planning");
-  assert.equal(renderTodoStatusText(snapshot), "CG2 · planning");
+  assert.equal(renderTodoStatusText(snapshot), "CG2 · planning · 1 ask");
 
   const lines = renderTodoWidgetText(snapshot);
-  assert.equal(lines[0], "CG2 planning — 1 asks");
-  assert.ok(lines.includes("No explicit subtasks yet."));
-  assert.ok(lines.some((line) => line.startsWith("Next: Clarify scope and produce an initial plan.")));
+  assert.equal(lines[0], "CG2 planning · 1 ask");
+  assert.equal(lines.some((line) => line.startsWith("Goal:")), false);
+  assert.equal(lines[1], "Ask: Ship CG2 widget");
+  assert.ok(lines.includes("Hint: break this into explicit subtasks."));
+  assert.equal(lines.some((line) => line.startsWith("Next:")), false);
 });
 
 test("widget hides the bootstrap root task once explicit subtasks exist", () => {
@@ -43,7 +45,79 @@ test("widget hides the bootstrap root task once explicit subtasks exist", () => 
 
   const lines = renderTodoWidgetText(snapshot);
   assert.ok(lines.some((line) => line.includes("Implement todo widget")));
-  assert.equal(lines.some((line) => line.includes("Ship CG2 widget")), false);
+  assert.equal(lines.some((line) => /^(?:→|•|⛔|\?|✓) Ship CG2 widget$/.test(line)), false);
+});
+
+test("widget only shows next action once explicit subtasks exist", () => {
+  const boot = bootstrap("Ship CG2 widget");
+  const created = applyAction(
+    boot.state,
+    { action: "create_task", title: "Implement todo widget", kind: "followup" },
+    { priorEvents: boot.events, nextId: boot.nextId },
+  );
+
+  const lines = renderTodoWidgetText(buildTodoWidgetSnapshot(created.nextState));
+  assert.ok(lines.some((line) => line.startsWith("Ask:")));
+  assert.ok(lines.some((line) => line.startsWith("Next:")));
+});
+
+test("widget prioritizes blocked tasks and surfaces reasons", () => {
+  const boot = bootstrap("Ship CG2 widget");
+  const firstCreated = applyAction(
+    boot.state,
+    { action: "create_task", title: "Implement todo widget", kind: "followup" },
+    { priorEvents: boot.events, nextId: boot.nextId },
+  );
+  const secondCreated = applyAction(
+    firstCreated.nextState,
+    { action: "create_task", title: "Verify search ownership", kind: "verification" },
+    { priorEvents: firstCreated.nextEvents, nextId: boot.nextId, now: "2026-04-18T10:06:00.000Z" },
+  );
+
+  const implementTaskId = secondCreated.nextState.openTaskIds.find((taskId) => secondCreated.nextState.tasks[taskId]?.title === "Implement todo widget");
+  const verifyTaskId = secondCreated.nextState.openTaskIds.find((taskId) => secondCreated.nextState.tasks[taskId]?.title === "Verify search ownership");
+  assert.ok(implementTaskId);
+  assert.ok(verifyTaskId);
+
+  const started = applyAction(
+    secondCreated.nextState,
+    { action: "start_task", taskId: implementTaskId! },
+    { priorEvents: secondCreated.nextEvents, nextId: boot.nextId, now: "2026-04-18T10:07:00.000Z" },
+  );
+  const blocked = applyAction(
+    started.nextState,
+    { action: "block_task", taskId: verifyTaskId!, reason: "Need service ownership decision" },
+    { priorEvents: started.nextEvents, nextId: boot.nextId, now: "2026-04-18T10:08:00.000Z" },
+  );
+
+  const lines = renderTodoWidgetText(buildTodoWidgetSnapshot(blocked.nextState));
+  const blockedIndex = lines.findIndex((line) => line.startsWith("⛔ Verify search ownership"));
+  const activeIndex = lines.findIndex((line) => line.startsWith("→ Implement todo widget"));
+  assert.ok(blockedIndex >= 0);
+  assert.ok(activeIndex >= 0);
+  assert.ok(blockedIndex < activeIndex);
+  assert.ok(lines.some((line) => line.includes("Need service ownership decision")));
+});
+
+test("done candidates stay visually distinct from done", () => {
+  const boot = bootstrap("Ship CG2 widget");
+  const created = applyAction(
+    boot.state,
+    { action: "create_task", title: "Summarize result", kind: "followup" },
+    { priorEvents: boot.events, nextId: boot.nextId },
+  );
+  const taskId = created.nextState.openTaskIds.find((candidateId) => created.nextState.tasks[candidateId]?.title === "Summarize result");
+  assert.ok(taskId);
+
+  const proposed = applyAction(
+    created.nextState,
+    { action: "propose_done", taskId: taskId! },
+    { priorEvents: created.nextEvents, nextId: boot.nextId, now: "2026-04-18T10:06:00.000Z" },
+  );
+
+  const lines = renderTodoWidgetText(buildTodoWidgetSnapshot(proposed.nextState));
+  assert.ok(lines.some((line) => line.startsWith("◇ Summarize result")));
+  assert.ok(lines.some((line) => line.includes("needs evidence or explicit acceptance")));
 });
 
 test("todo widget output is stable across advisory compaction events", () => {
