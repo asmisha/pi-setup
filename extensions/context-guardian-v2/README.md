@@ -1,6 +1,6 @@
 # context-guardian-v2
 
-A separate, opt-in rewrite of `context-guardian` built around:
+A separate rewrite of `context-guardian` built around:
 
 - append-only ledger events
 - deterministic projector
@@ -12,12 +12,12 @@ A separate, opt-in rewrite of `context-guardian` built around:
 
 ## Safety
 
-This extension is intentionally **disabled by default** so it can live next to the current `context-guardian` without both hook sets fighting each other.
+This extension is **enabled by default**. Keep the legacy `context-guardian` disabled so the two hook sets do not fight each other.
 
-Enable it explicitly:
+Opt out explicitly when needed:
 
 ```bash
-export PI_CONTEXT_GUARDIAN_V2_ENABLED=1
+export PI_CONTEXT_GUARDIAN_V2_ENABLED=0
 ```
 
 ## Structure
