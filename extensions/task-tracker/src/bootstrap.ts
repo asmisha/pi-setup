@@ -97,3 +97,21 @@ export function buildExplicitAskCaptureContract(currentContract: UserContract, p
     updatedFrom: "user",
   };
 }
+
+export function buildExplicitAskCaptureEvent(input: {
+  currentContract: UserContract;
+  prompt: string;
+  now: string;
+  nextId(prefix: string): string;
+  sourceMessageId?: string;
+}): KnownLedgerEvent | null {
+  const { currentContract, prompt, now, nextId, sourceMessageId } = input;
+  const contract = buildExplicitAskCaptureContract(currentContract, prompt, now, nextId("ask"), sourceMessageId);
+  if (!contract) return null;
+
+  return {
+    type: ENTRY_TYPES.contractUpsert,
+    ...makeEventMeta("user", "authoritative", now, sourceMessageId),
+    payload: { contract },
+  };
+}

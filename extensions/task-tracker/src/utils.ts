@@ -71,6 +71,20 @@ export function isWeakAcknowledgement(text: string): boolean {
   return WEAK_ACKNOWLEDGEMENTS.has(normalizeForMatch(text));
 }
 
+export function extractUserPromptText(content: string | unknown[]): string | null {
+  if (typeof content === "string") return asTrimmedString(content);
+  if (!Array.isArray(content)) return null;
+
+  const parts = content.flatMap((item) => {
+    if (!item || typeof item !== "object") return [] as string[];
+    if (!("type" in item) || item.type !== "text") return [] as string[];
+    if (!("text" in item) || typeof item.text !== "string") return [] as string[];
+    return [item.text];
+  });
+
+  return asTrimmedString(parts.join("\n"));
+}
+
 export function mergeArtifacts(...lists: Array<AdvisoryArtifact[] | undefined>): AdvisoryArtifact[] {
   const seen = new Set<string>();
   const result: AdvisoryArtifact[] = [];

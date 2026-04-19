@@ -1,14 +1,14 @@
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@mariozechner/pi-coding-agent";
 import { applyTaskTrackerInput } from "./src/actions.ts";
 import { loadLedgerEvents, serializeEventData } from "./src/branch-store.ts";
-import { buildBootstrapEvents, buildExplicitAskCaptureContract } from "./src/bootstrap.ts";
+import { buildBootstrapEvents, buildExplicitAskCaptureEvent } from "./src/bootstrap.ts";
 import { isSubagentProcess, MAX_INFERRED_TASKS_PER_TURN } from "./src/config.ts";
 import { explainTaskDone, explainTaskOpen, renderProjectedState, renderRecentLedgerEventsText } from "./src/debug.ts";
 import { projectLedger } from "./src/projector.ts";
 import { renderActiveWorkPacket } from "./src/prompt.ts";
 import type { KnownLedgerEvent, ProjectedState, TaskTrackerAction } from "./src/types.ts";
 import { ENTRY_TYPES } from "./src/types.ts";
-import { makeEventMeta, isLowSignalUserNudge } from "./src/utils.ts";
+import { extractUserPromptText, makeEventMeta, isLowSignalUserNudge } from "./src/utils.ts";
 import { buildTodoWidgetSnapshot, renderTodoWidgetText, type TodoWidgetSnapshot } from "./src/widget.ts";
 import { TASK_TRACKER_TOOL_PARAMS } from "./src/tool-schema.ts";
 
@@ -144,16 +144,17 @@ export default function taskTrackerExtension(pi: ExtensionAPI) {
 
   const captureExplicitAsk = (prompt: string) => {
     if (!currentState.contract || isLowSignalUserNudge(prompt)) return;
-    const nextContract = buildExplicitAskCaptureContract(currentState.contract, prompt, new Date().toISOString(), nextId("ask"));
-    if (!nextContract) return;
-    const event: KnownLedgerEvent = {
-      type: ENTRY_TYPES.contractUpsert,
-      ...makeEventMeta("user", "authoritative", new Date().toISOString()),
-      payload: { contract: nextContract },
-    };
+    const now = new Date().toISOString();
+    const event = buildExplicitAskCaptureEvent({ currentContract: currentState.contract, prompt, now, nextId });
+    if (!event) return;
     const persisted = persistEvents(pi, currentEvents, [event]);
     currentEvents = persisted.events;
     currentState = persisted.state;
+  };
+
+  const captureUserPrompt = (prompt: string) => {
+    ensureBootstrapped(prompt);
+    captureExplicitAsk(prompt);
   };
 
   pi.on("session_start", async (_event, ctx) => {
@@ -178,13 +179,21 @@ export default function taskTrackerExtension(pi: ExtensionAPI) {
     if (subagentProcess) return;
     refreshBranch(ctx.sessionManager.getBranch());
     createdInferredTasksThisTurn = 0;
-    ensureBootstrapped(event.prompt);
-    captureExplicitAsk(event.prompt);
+    captureUserPrompt(event.prompt);
     updateUi(ctx);
 
     return {
       systemPrompt: `${event.systemPrompt}\n\n## Task Tracker Active Work Packet\n${renderActiveWorkPacket(currentState)}`,
     };
+  });
+
+  pi.on("message_start", async (event, ctx) => {
+    if (subagentProcess || event.message.role !== "user") return;
+    refreshBranch(ctx.sessionManager.getBranch());
+    const prompt = extractUserPromptText(event.message.content);
+    if (!prompt) return;
+    captureUserPrompt(prompt);
+    updateUi(ctx);
   });
 
   if (subagentProcess) {
