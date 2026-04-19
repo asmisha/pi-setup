@@ -1,4 +1,4 @@
-import { latestDoneCandidates, latestOpenTasks } from "./projector.ts";
+import { latestDoneCandidates, latestOpenTasks, latestRecentDone } from "./projector.ts";
 import type { ProjectedState, TaskItem, TaskStatus } from "./types.ts";
 
 export type TodoWidgetMode = "planning" | "active" | "blocked" | "waiting";
@@ -20,6 +20,7 @@ export type TodoWidgetSnapshot = {
     blocked: number;
     awaitingUser: number;
     doneCandidate: number;
+    done: number;
     openAsks: number;
   };
   tasks: TodoWidgetTaskRow[];
@@ -122,6 +123,7 @@ function summarizeMode(snapshot: TodoWidgetSnapshot): string {
       const parts: string[] = [];
       if (snapshot.counts.inProgress > 0) parts.push(countLabel(snapshot.counts.inProgress, "active"));
       if (snapshot.counts.open > 0) parts.push(countLabel(snapshot.counts.open, "open"));
+      if (snapshot.counts.done > 0) parts.push(countLabel(snapshot.counts.done, "done"));
       if (snapshot.counts.doneCandidate > 0) parts.push(countLabel(snapshot.counts.doneCandidate, "ready"));
       if (snapshot.counts.openAsks > 0) parts.push(askCountLabel(snapshot.counts.openAsks));
       return parts.join(" · ") || "active";
@@ -135,6 +137,7 @@ function buildSummaryBits(snapshot: TodoWidgetSnapshot): string[] {
   if (snapshot.counts.awaitingUser > 0) bits.push(countLabel(snapshot.counts.awaitingUser, "waiting"));
   if (snapshot.counts.blocked > 0) bits.push(countLabel(snapshot.counts.blocked, "blocked"));
   if (snapshot.counts.open > 0) bits.push(countLabel(snapshot.counts.open, "open"));
+  if (snapshot.counts.done > 0) bits.push(countLabel(snapshot.counts.done, "done"));
   if (snapshot.counts.doneCandidate > 0) bits.push(countLabel(snapshot.counts.doneCandidate, "ready"));
   if (snapshot.counts.openAsks > 0) bits.push(askCountLabel(snapshot.counts.openAsks));
   return bits;
@@ -142,6 +145,7 @@ function buildSummaryBits(snapshot: TodoWidgetSnapshot): string[] {
 
 function taskPrefix(task: TodoWidgetTaskRow): string {
   if (task.status === "done_candidate") return "◇";
+  if (task.status === "done") return "✓";
   if (task.status === "blocked") return "⛔";
   if (task.status === "awaiting_user") return "?";
   if (task.active || task.status === "in_progress") return "→";
@@ -159,19 +163,25 @@ export function buildTodoWidgetSnapshot(state: ProjectedState, options?: { maxTa
 
   const allOpenTasks = sortTasks(latestOpenTasks(state), state.execution.activeTaskIds);
   const allDoneCandidates = sortTasks(latestDoneCandidates(state), state.execution.activeTaskIds);
+  const allRecentDone = sortTasks(latestRecentDone(state), state.execution.activeTaskIds);
 
   const visibleOpenTasks = allOpenTasks.filter((task) => !isRootObjectiveTask(state, task));
   const visibleDoneCandidates = allDoneCandidates.filter((task) => !isRootObjectiveTask(state, task));
-  const allVisibleTasks = [...visibleOpenTasks, ...visibleDoneCandidates];
+  const visibleRecentDone = allRecentDone.filter((task) => !isRootObjectiveTask(state, task));
+  const allVisibleTasks = [...visibleOpenTasks, ...visibleDoneCandidates, ...visibleRecentDone];
 
-  const rootOnly = visibleOpenTasks.length === 0 && visibleDoneCandidates.length === 0 && (allOpenTasks.length > 0 || allDoneCandidates.length > 0);
+  const rootOnly = visibleOpenTasks.length === 0
+    && visibleDoneCandidates.length === 0
+    && visibleRecentDone.length === 0
+    && (allOpenTasks.length > 0 || allDoneCandidates.length > 0 || allRecentDone.length > 0);
   const openCount = visibleOpenTasks.length;
   const inProgressCount = visibleOpenTasks.filter((task) => task.status === "in_progress").length;
   const blockedCount = visibleOpenTasks.filter((task) => task.status === "blocked").length;
   const awaitingUserCount = visibleOpenTasks.filter((task) => task.status === "awaiting_user").length;
   const doneCandidateCount = visibleDoneCandidates.length;
+  const doneCount = visibleRecentDone.length;
 
-  if (!rootOnly && openCount === 0 && doneCandidateCount === 0 && openAsks.length === 0) {
+  if (!rootOnly && openCount === 0 && doneCandidateCount === 0 && doneCount === 0 && openAsks.length === 0) {
     return null;
   }
 
@@ -205,6 +215,7 @@ export function buildTodoWidgetSnapshot(state: ProjectedState, options?: { maxTa
       blocked: blockedCount,
       awaitingUser: awaitingUserCount,
       doneCandidate: doneCandidateCount,
+      done: doneCount,
       openAsks: openAsks.length,
     },
     tasks: selectedTasks,

@@ -95,6 +95,7 @@ function renderSummaryBits(ctx: ExtensionContext, snapshot: TodoWidgetSnapshot):
   if (snapshot.counts.awaitingUser > 0) bits.push(theme.fg("warning", countLabel(snapshot.counts.awaitingUser, "waiting")));
   if (snapshot.counts.blocked > 0) bits.push(theme.fg("error", countLabel(snapshot.counts.blocked, "blocked")));
   if (snapshot.counts.open > 0) bits.push(theme.fg("text", countLabel(snapshot.counts.open, "open")));
+  if (snapshot.counts.done > 0) bits.push(theme.fg("muted", countLabel(snapshot.counts.done, "done")));
   if (snapshot.counts.doneCandidate > 0) bits.push(theme.fg("warning", countLabel(snapshot.counts.doneCandidate, "ready")));
   if (snapshot.counts.openAsks > 0) bits.push(theme.fg("warning", askCountLabel(snapshot.counts.openAsks)));
   return bits;
@@ -137,6 +138,9 @@ function renderThemedTodoWidgetLines(ctx: ExtensionContext, snapshot: TodoWidget
     }
     if (line.startsWith("◇ ")) {
       return `${theme.fg("dim", "│")} ${theme.fg("warning", "◇")} ${theme.fg("warning", line.slice(2))}`;
+    }
+    if (line.startsWith("✓ ")) {
+      return `${theme.fg("dim", "│")} ${theme.fg("muted", "✓")} ${theme.fg("muted", line.slice(2))}`;
     }
     if (line.startsWith("• ")) {
       return `${theme.fg("dim", "│")} ${theme.fg("muted", "•")} ${line.slice(2)}`;

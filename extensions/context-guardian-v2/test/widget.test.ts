@@ -186,6 +186,60 @@ test("done candidates stay visually distinct from done", () => {
   assert.ok(lines.some((line) => line.includes("needs evidence or explicit acceptance")));
 });
 
+test("recent done tasks show after open tasks", () => {
+  const boot = bootstrap("Ship CG2 widget");
+  const createdOpen = applyAction(
+    boot.state,
+    { action: "create_task", title: "Implement todo widget", kind: "followup" },
+    { priorEvents: boot.events, nextId: boot.nextId },
+  );
+  const createdDone = applyAction(
+    createdOpen.nextState,
+    { action: "create_task", title: "Write changelog", kind: "followup" },
+    { priorEvents: createdOpen.nextEvents, nextId: boot.nextId, now: "2026-04-18T10:06:00.000Z" },
+  );
+  const doneTaskId = createdDone.nextState.openTaskIds.find((taskId) => createdDone.nextState.tasks[taskId]?.title === "Write changelog");
+  assert.ok(doneTaskId);
+
+  const proposed = applyAction(
+    createdDone.nextState,
+    { action: "propose_done", taskId: doneTaskId! },
+    { priorEvents: createdDone.nextEvents, nextId: boot.nextId, now: "2026-04-18T10:07:00.000Z" },
+  );
+  const withEvidence = applyAction(
+    proposed.nextState,
+    {
+      action: "add_evidence",
+      taskId: doneTaskId!,
+      evidence: { kind: "test", ref: "npm test", summary: "All tests passed", level: "verified" },
+    },
+    { priorEvents: proposed.nextEvents, nextId: boot.nextId, now: "2026-04-18T10:08:00.000Z" },
+  );
+  const committed = applyAction(
+    withEvidence.nextState,
+    { action: "commit_done", taskId: doneTaskId!, reason: "verified_evidence" },
+    { priorEvents: withEvidence.nextEvents, nextId: boot.nextId, now: "2026-04-18T10:09:00.000Z" },
+  );
+
+  const snapshot = buildTodoWidgetSnapshot(committed.nextState);
+  assert(snapshot);
+  assert.equal(snapshot.counts.open, 1);
+  assert.equal(snapshot.counts.done, 1);
+  assert.equal(snapshot.tasks[0]?.title, "Implement todo widget");
+  assert.equal(snapshot.tasks[0]?.status, "todo");
+  assert.equal(snapshot.tasks[1]?.title, "Write changelog");
+  assert.equal(snapshot.tasks[1]?.status, "done");
+
+  const lines = renderTodoWidgetText(snapshot);
+  assert.match(lines[0] ?? "", /1 open/);
+  assert.match(lines[0] ?? "", /1 done/);
+  const openIndex = lines.findIndex((line) => line.startsWith("• Implement todo widget"));
+  const doneIndex = lines.findIndex((line) => line.startsWith("✓ Write changelog"));
+  assert.ok(openIndex >= 0);
+  assert.ok(doneIndex >= 0);
+  assert.ok(openIndex < doneIndex);
+});
+
 test("todo widget output is stable across advisory compaction events", () => {
   const boot = bootstrap("Ship CG2 widget");
   const created = applyAction(
