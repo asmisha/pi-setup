@@ -9,11 +9,12 @@ import type {
   TaskKind,
   TaskSource,
   TaskTrackerAction,
+  TaskTrackerAtomicAction,
   TrackerActionContext,
   TrackerActionResult,
 } from "./types.ts";
 import { ENTRY_TYPES } from "./types.ts";
-import { canCommitTaskDone, findTask, listArchivedTasks, listOpenTasks } from "./projector.ts";
+import { canCommitTaskDone, findTask, listArchivedTasks, listOpenTasks, projectLedger } from "./projector.ts";
 import { makeEventMeta, normalizeForMatch, normalizeStringList } from "./utils.ts";
 
 function renderTaskLine(task: TaskItem): string {
@@ -195,7 +196,178 @@ function buildExecutionPatch(
   };
 }
 
-export function applyTaskTrackerAction(state: ProjectedState, input: TaskTrackerAction, context: TrackerActionContext): TrackerActionResult {
+type BatchAliases = {
+  tasks: Map<string, string>;
+  evidence: Map<string, string>;
+};
+
+function normalizeAliasName(alias: string, kind: string): string {
+  const trimmed = alias.trim().replace(/^\$/u, "");
+  if (!trimmed) {
+    throw new Error(`Invalid ${kind} alias.`);
+  }
+  return trimmed;
+}
+
+function resolveBatchReference(value: string, aliases: Map<string, string>, kind: string): string {
+  if (!value.startsWith("$")) return value;
+  const alias = normalizeAliasName(value, kind);
+  const resolved = aliases.get(alias);
+  if (!resolved) {
+    throw new Error(`Unknown ${kind} alias $${alias}.`);
+  }
+  return resolved;
+}
+
+function resolveBatchReferences(values: string[] | undefined, aliases: Map<string, string>, kind: string): string[] | undefined {
+  if (!values) return values;
+  return values.map((value) => resolveBatchReference(value, aliases, kind));
+}
+
+function registerBatchAlias(aliases: Map<string, string>, alias: string, resolvedId: string, kind: string) {
+  const normalized = normalizeAliasName(alias, kind);
+  if (aliases.has(normalized)) {
+    throw new Error(`Duplicate ${kind} alias $${normalized}.`);
+  }
+  aliases.set(normalized, resolvedId);
+}
+
+function resolveBulkAction(input: TaskTrackerAtomicAction, aliases: BatchAliases): TaskTrackerAtomicAction {
+  switch (input.action) {
+    case "create_task":
+      return {
+        ...input,
+        ...(input.parentId ? { parentId: resolveBatchReference(input.parentId, aliases.tasks, "task") } : {}),
+        ...(input.dependsOn ? { dependsOn: resolveBatchReferences(input.dependsOn, aliases.tasks, "task") } : {}),
+      };
+    case "start_task":
+    case "block_task":
+    case "await_user":
+    case "propose_done":
+    case "link_file":
+    case "note":
+      return { ...input, taskId: resolveBatchReference(input.taskId, aliases.tasks, "task") };
+    case "commit_done":
+      return {
+        ...input,
+        taskId: resolveBatchReference(input.taskId, aliases.tasks, "task"),
+        ...(input.evidenceIds ? { evidenceIds: resolveBatchReferences(input.evidenceIds, aliases.evidence, "evidence") } : {}),
+      };
+    case "add_evidence":
+      return { ...input, taskId: resolveBatchReference(input.taskId, aliases.tasks, "task") };
+    case "record_acceptance":
+      return input.taskId ? { ...input, taskId: resolveBatchReference(input.taskId, aliases.tasks, "task") } : input;
+    case "set_next_action":
+      return input.activeTaskIds ? { ...input, activeTaskIds: resolveBatchReferences(input.activeTaskIds, aliases.tasks, "task") } : input;
+    case "list_open":
+    case "list_open_asks":
+    case "list_archived":
+    case "cancel_ask":
+    case "propose_contract_change":
+      return input;
+    default: {
+      const neverAction: never = input;
+      throw new Error(`Unsupported batched task_tracker action: ${JSON.stringify(neverAction)}`);
+    }
+  }
+}
+
+export function applyTaskTrackerInput(
+  state: ProjectedState,
+  currentEvents: KnownLedgerEvent[],
+  input: TaskTrackerAction,
+  context: TrackerActionContext,
+): TrackerActionResult {
+  if (input.actions.length === 0) {
+    return {
+      events: [],
+      message: "No task_tracker actions provided.",
+      createdInferredTasksThisTurn: context.createdInferredTasksThisTurn,
+      ok: false,
+    };
+  }
+
+  const aliases: BatchAliases = {
+    tasks: new Map<string, string>(),
+    evidence: new Map<string, string>(),
+  };
+  const batchEvents: KnownLedgerEvent[] = [];
+  const stepMessages: string[] = [];
+  let workingState = state;
+  let workingEvents = currentEvents;
+  let createdInferredTasksThisTurn = context.createdInferredTasksThisTurn;
+
+  for (const [index, rawAction] of input.actions.entries()) {
+    let resolvedAction: TaskTrackerAtomicAction;
+    try {
+      resolvedAction = resolveBulkAction(rawAction, aliases);
+    } catch (error) {
+      return {
+        events: [],
+        message: `Batched task_tracker call failed at step ${index + 1}: ${error instanceof Error ? error.message : "Unknown alias resolution error."} No changes were applied.`,
+        createdInferredTasksThisTurn: context.createdInferredTasksThisTurn,
+        ok: false,
+      };
+    }
+
+    let result: TrackerActionResult;
+    try {
+      result = applyTaskTrackerAction(workingState, resolvedAction, {
+        ...context,
+        createdInferredTasksThisTurn,
+      });
+    } catch (error) {
+      return {
+        events: [],
+        message: `Batched task_tracker call failed at step ${index + 1}: ${error instanceof Error ? error.message : "Unknown execution error."} No changes were applied.`,
+        createdInferredTasksThisTurn: context.createdInferredTasksThisTurn,
+        ok: false,
+      };
+    }
+
+    if (result.ok === false) {
+      return {
+        events: [],
+        message: `Batched task_tracker call failed at step ${index + 1}: ${result.message} No changes were applied.`,
+        createdInferredTasksThisTurn: context.createdInferredTasksThisTurn,
+        ok: false,
+      };
+    }
+
+    try {
+      if (rawAction.action === "create_task" && rawAction.taskAlias && result.references?.taskId) {
+        registerBatchAlias(aliases.tasks, rawAction.taskAlias, result.references.taskId, "task");
+      }
+      if (rawAction.action === "add_evidence" && rawAction.evidenceAlias && result.references?.evidenceId) {
+        registerBatchAlias(aliases.evidence, rawAction.evidenceAlias, result.references.evidenceId, "evidence");
+      }
+    } catch (error) {
+      return {
+        events: [],
+        message: `Batched task_tracker call failed at step ${index + 1}: ${error instanceof Error ? error.message : "Unknown alias registration error."} No changes were applied.`,
+        createdInferredTasksThisTurn: context.createdInferredTasksThisTurn,
+        ok: false,
+      };
+    }
+
+    stepMessages.push(`${index + 1}. ${result.message}`);
+    createdInferredTasksThisTurn = result.createdInferredTasksThisTurn;
+
+    if (result.events.length > 0) {
+      batchEvents.push(...result.events);
+      workingEvents = [...workingEvents, ...result.events];
+      workingState = projectLedger(workingEvents);
+    }
+  }
+
+  return {
+    events: batchEvents,
+    message: [`Applied task_tracker actions (${input.actions.length} steps).`, ...stepMessages].join("\n"),
+    createdInferredTasksThisTurn,
+  };
+}
+
+export function applyTaskTrackerAction(state: ProjectedState, input: TaskTrackerAtomicAction, context: TrackerActionContext): TrackerActionResult {
   switch (input.action) {
     case "list_open": {
       return {
@@ -226,6 +398,7 @@ export function applyTaskTrackerAction(state: ProjectedState, input: TaskTracker
           events: [],
           message: `Rejected inferred task creation: per-turn cap ${context.maxInferredTasksPerTurn} reached.`,
           createdInferredTasksThisTurn: context.createdInferredTasksThisTurn,
+          ok: false,
         };
       }
 
@@ -235,6 +408,7 @@ export function applyTaskTrackerAction(state: ProjectedState, input: TaskTracker
           events: [],
           message: `Skipped duplicate task: ${renderTaskLine(duplicate)}`,
           createdInferredTasksThisTurn: context.createdInferredTasksThisTurn,
+          references: { taskId: duplicate.id },
         };
       }
 
@@ -265,6 +439,7 @@ export function applyTaskTrackerAction(state: ProjectedState, input: TaskTracker
         events,
         message: `Created task ${renderTaskLine(task)}`,
         createdInferredTasksThisTurn: kind === "inferred" ? context.createdInferredTasksThisTurn + 1 : context.createdInferredTasksThisTurn,
+        references: { taskId: task.id },
       };
     }
     case "start_task": {
@@ -372,6 +547,7 @@ export function applyTaskTrackerAction(state: ProjectedState, input: TaskTracker
           events: [],
           message: `Cannot mark ${input.taskId} done: ${gate.reason}`,
           createdInferredTasksThisTurn: context.createdInferredTasksThisTurn,
+          ok: false,
         };
       }
 
@@ -386,6 +562,7 @@ export function applyTaskTrackerAction(state: ProjectedState, input: TaskTracker
             events: [],
             message: error instanceof Error ? error.message : "Cannot satisfy the requested ask IDs.",
             createdInferredTasksThisTurn: context.createdInferredTasksThisTurn,
+            ok: false,
           };
         }
       }
@@ -434,6 +611,7 @@ export function applyTaskTrackerAction(state: ProjectedState, input: TaskTracker
         events,
         message: `Added evidence ${evidence.id} to ${renderTaskLine(task)}`,
         createdInferredTasksThisTurn: context.createdInferredTasksThisTurn,
+        references: { evidenceId: evidence.id },
       };
     }
     case "record_acceptance": {
@@ -466,6 +644,7 @@ export function applyTaskTrackerAction(state: ProjectedState, input: TaskTracker
           events: [],
           message: error instanceof Error ? error.message : "Cannot cancel ask.",
           createdInferredTasksThisTurn: context.createdInferredTasksThisTurn,
+          ok: false,
         };
       }
       if (context.actor !== "manual" && !input.sourceMessageId) {
@@ -473,6 +652,7 @@ export function applyTaskTrackerAction(state: ProjectedState, input: TaskTracker
           events: [],
           message: `Cannot cancel ${ask.id} without manual authority or an explicit sourceMessageId.`,
           createdInferredTasksThisTurn: context.createdInferredTasksThisTurn,
+          ok: false,
         };
       }
       return {
@@ -493,6 +673,7 @@ export function applyTaskTrackerAction(state: ProjectedState, input: TaskTracker
           events: [],
           message: "Cannot propose contract change without an active contract.",
           createdInferredTasksThisTurn: context.createdInferredTasksThisTurn,
+          ok: false,
         };
       }
       const proposal: ContractChangeProposal = {

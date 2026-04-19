@@ -70,6 +70,27 @@ Then run `/reload` or restart Pi.
 
 - `task_tracker`
 
+Pass task-tracker changes as `actions[]`. Even a single update should be a one-item array.
+
+Example:
+
+```json
+{
+  "actions": [
+    { "action": "create_task", "title": "Inspect logs", "kind": "verification", "taskAlias": "lane" },
+    { "action": "start_task", "taskId": "$lane" },
+    {
+      "action": "add_evidence",
+      "taskId": "$lane",
+      "evidence": { "kind": "test", "ref": "npm test", "summary": "All tests passed", "level": "verified" },
+      "evidenceAlias": "tests"
+    },
+    { "action": "propose_done", "taskId": "$lane" },
+    { "action": "commit_done", "taskId": "$lane", "reason": "verified_evidence", "evidenceIds": ["$tests"] }
+  ]
+}
+```
+
 ## Tests
 
 Run from this directory:

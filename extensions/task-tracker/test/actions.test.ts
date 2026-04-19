@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { bootstrap } from "./helpers.ts";
-import { applyTaskTrackerAction } from "../src/actions.ts";
+import { applyTaskTrackerAction, applyTaskTrackerInput } from "../src/actions.ts";
 import { projectLedger } from "../src/projector.ts";
 import { isWeakAcknowledgement } from "../src/utils.ts";
 
@@ -221,6 +221,61 @@ test("blocking one parallel lane keeps runnable sibling work active", () => {
   assert.equal(finalState.execution.waitingFor, "nothing");
   assert.equal(finalState.execution.blocker, null);
   assert.equal(finalState.tasks[firstTaskId!]?.status, "blocked");
+});
+
+test("actions[] can create, reference, and complete a task in one call", () => {
+  const { state, events, nextId } = bootstrap("Bulk plan work");
+
+  const result = applyTaskTrackerInput(
+    state,
+    events,
+    {
+      actions: [
+        { action: "create_task", title: "Investigate logs", kind: "verification", taskAlias: "lane" },
+        { action: "start_task", taskId: "$lane" },
+        {
+          action: "add_evidence",
+          taskId: "$lane",
+          evidence: { kind: "test", ref: "npm test", summary: "All tests passed", level: "verified" },
+          evidenceAlias: "tests",
+        },
+        { action: "propose_done", taskId: "$lane", note: "Verified by tests" },
+        { action: "commit_done", taskId: "$lane", reason: "verified_evidence", evidenceIds: ["$tests"] },
+      ],
+    },
+    createContext(nextId),
+  );
+  const finalState = projectLedger([...events, ...result.events]);
+  const createdTask = Object.values(finalState.tasks).find((task) => task.title === "Investigate logs");
+
+  assert.match(result.message, /Applied task_tracker actions/i);
+  assert.ok(createdTask);
+  assert.equal(createdTask?.status, "done");
+  assert.equal(createdTask?.evidence.length, 1);
+  assert.equal(createdTask?.doneReason, "verified_evidence");
+});
+
+test("actions[] abort without partial events when a later step is rejected", () => {
+  const { state, events, nextId } = bootstrap("Bulk plan work");
+
+  const result = applyTaskTrackerInput(
+    state,
+    events,
+    {
+      actions: [
+        { action: "create_task", title: "Investigate logs", kind: "verification", taskAlias: "lane" },
+        { action: "start_task", taskId: "$lane" },
+        { action: "commit_done", taskId: "$lane", reason: "verified_evidence" },
+      ],
+    },
+    createContext(nextId),
+  );
+  const finalState = projectLedger([...events, ...result.events]);
+
+  assert.equal(result.events.length, 0);
+  assert.equal(result.ok, false);
+  assert.match(result.message, /Batched task_tracker call failed at step 3/i);
+  assert.equal(Object.values(finalState.tasks).some((task) => task.title === "Investigate logs"), false);
 });
 
 test("awaiting user on one parallel lane keeps runnable sibling work active", () => {

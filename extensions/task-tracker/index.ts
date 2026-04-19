@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@mariozechner/pi-coding-agent";
-import { applyTaskTrackerAction } from "./src/actions.ts";
+import { applyTaskTrackerInput } from "./src/actions.ts";
 import { loadLedgerEvents, serializeEventData } from "./src/branch-store.ts";
 import { buildBootstrapEvents, buildExplicitAskCaptureContract } from "./src/bootstrap.ts";
 import { isSubagentProcess, MAX_INFERRED_TASKS_PER_TURN } from "./src/config.ts";
@@ -195,9 +195,11 @@ export default function taskTrackerExtension(pi: ExtensionAPI) {
     name: "task_tracker",
     label: "Task Tracker",
     description: "Safe task tracker extension. Uses granular event-sourced updates instead of patching whole state.",
-    promptSnippet: "Track open tasks, evidence, acceptance, and next actions without rewriting the whole contract.",
+    promptSnippet: "Track open tasks, evidence, acceptance, and next actions without rewriting the whole contract. Pass related updates as one actions[] call.",
     promptGuidelines: [
       "Use this to create or update granular task-tracker events.",
+      "Pass task_tracker changes as actions[]. Even a single update should be a one-item actions array.",
+      "Inside one actions[] call, create_task may set taskAlias and add_evidence may set evidenceAlias; later steps can reference them as $alias in taskId, parentId, dependsOn, activeTaskIds, and evidenceIds.",
       "Keep execution.activeTaskIds honest; multiple active sibling tasks are allowed when the work truly splits.",
       "Prefer propose_done + evidence + commit_done over directly declaring success.",
       "If commit_done fully answers an open ask, include askIdsToSatisfy so the ask does not linger open.",
@@ -205,7 +207,7 @@ export default function taskTrackerExtension(pi: ExtensionAPI) {
     ],
     parameters: TASK_TRACKER_TOOL_PARAMS as any,
     async execute(_toolCallId: string, rawParams: TaskTrackerAction, _signal, _onUpdate, ctx: ExtensionContext) {
-      const result = applyTaskTrackerAction(currentState, rawParams, {
+      const result = applyTaskTrackerInput(currentState, currentEvents, rawParams, {
         now: new Date().toISOString(),
         actor: "assistant",
         authority: "authoritative",

@@ -1,8 +1,8 @@
 import type { KnownLedgerEvent } from "../src/types.ts";
-import { applyTaskTrackerAction } from "../src/actions.ts";
+import { applyTaskTrackerAction, applyTaskTrackerInput } from "../src/actions.ts";
 import { buildBootstrapEvents } from "../src/bootstrap.ts";
 import { projectLedger } from "../src/projector.ts";
-import type { ProjectedState, TaskTrackerAction } from "../src/types.ts";
+import type { ProjectedState, TaskTrackerAction, TaskTrackerAtomicAction } from "../src/types.ts";
 
 export function createDeterministicIdFactory() {
   let counter = 0;
@@ -26,11 +26,12 @@ export function bootstrap(objective = "Ship task tracker") {
 
 export function applyAction(
   state: ProjectedState,
-  action: TaskTrackerAction,
+  action: TaskTrackerAtomicAction | TaskTrackerAction,
   options?: Partial<Parameters<typeof applyTaskTrackerAction>[2]> & { priorEvents?: KnownLedgerEvent[] },
 ) {
   const nextId = options?.nextId ?? createDeterministicIdFactory();
-  const result = applyTaskTrackerAction(state, action, {
+  const priorEvents = options?.priorEvents ?? [];
+  const result = applyTaskTrackerInput(state, priorEvents, "actions" in action ? action : { actions: [action] }, {
     now: options?.now ?? "2026-04-18T10:05:00.000Z",
     actor: options?.actor ?? "assistant",
     authority: options?.authority ?? "authoritative",
@@ -38,7 +39,7 @@ export function applyAction(
     createdInferredTasksThisTurn: options?.createdInferredTasksThisTurn ?? 0,
     nextId,
   });
-  const nextEvents = [...(options?.priorEvents ?? []), ...result.events] as KnownLedgerEvent[];
+  const nextEvents = [...priorEvents, ...result.events] as KnownLedgerEvent[];
   return {
     result,
     nextEvents,

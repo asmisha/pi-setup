@@ -297,23 +297,27 @@ export type ProjectedStateSnapshot = {
   acceptances: AcceptanceRecord[];
 };
 
-export type TaskTrackerAction =
+export type TaskTrackerAtomicAction =
   | { action: "list_open" }
   | { action: "list_open_asks" }
   | { action: "list_archived"; limit?: number }
-  | { action: "create_task"; title: string; kind?: TaskKind; parentId?: string; dependsOn?: string[] }
+  | { action: "create_task"; title: string; kind?: TaskKind; parentId?: string; dependsOn?: string[]; taskAlias?: string }
   | { action: "start_task"; taskId: string }
   | { action: "block_task"; taskId: string; reason: string }
   | { action: "await_user"; taskId: string; reason: string }
   | { action: "propose_done"; taskId: string; note?: string }
   | { action: "commit_done"; taskId: string; reason: DoneReason; evidenceIds?: string[]; askIdsToSatisfy?: string[] }
-  | { action: "add_evidence"; taskId: string; evidence: TaskEvidenceInput }
+  | { action: "add_evidence"; taskId: string; evidence: TaskEvidenceInput; evidenceAlias?: string }
   | { action: "record_acceptance"; taskId?: string; note: string; sourceMessageId?: string }
   | { action: "cancel_ask"; askId: string; sourceMessageId?: string }
   | { action: "propose_contract_change"; kind: ContractChangeKind; proposedValue: string | string[]; reason: string }
   | { action: "set_next_action"; nextAction: string; activeTaskIds?: string[] }
   | { action: "link_file"; taskId: string; path: string }
   | { action: "note"; taskId: string; text: string };
+
+export type TaskTrackerAction = {
+  actions: TaskTrackerAtomicAction[];
+};
 
 export type TaskEvidenceInput = {
   kind: EvidenceKind;
@@ -336,4 +340,9 @@ export type TrackerActionResult = {
   events: KnownLedgerEvent[];
   message: string;
   createdInferredTasksThisTurn: number;
+  ok?: boolean;
+  references?: {
+    taskId?: string;
+    evidenceId?: string;
+  };
 };
