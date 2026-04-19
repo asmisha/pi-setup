@@ -64,8 +64,10 @@ Rules:
 Use GitHub CLI to verify the live PR state:
 
 ```bash
+PI_TMP_DIR="${TMPDIR:-/tmp}"
+PR_FILES_JSON="$(mktemp "$PI_TMP_DIR/pr-files.XXXXXX")"
 gh pr view <pr> --json number,url,headRefOid,baseRefName,headRefName
-gh api repos/<owner>/<repo>/pulls/<number>/files --paginate > /tmp/pr-files.json
+gh api repos/<owner>/<repo>/pulls/<number>/files --paginate > "$PR_FILES_JSON"
 ```
 
 Use the current PR diff, not stale local notes, when mapping comment locations.
@@ -138,9 +140,11 @@ Ask for explicit confirmation before any GitHub write.
 Use the review creation endpoint without `event` so the review remains pending:
 
 ```bash
+PI_TMP_DIR="${TMPDIR:-/tmp}"
+REVIEW_JSON="$(mktemp "$PI_TMP_DIR/review.XXXXXX")"
 gh api repos/<owner>/<repo>/pulls/<number>/reviews \
   --method POST \
-  --input /tmp/review.json
+  --input "$REVIEW_JSON"
 ```
 
 Payload shape:
@@ -201,7 +205,7 @@ Do not post UNCERTAIN findings as inline comments, and do not choose a non-defau
 
 ## Practical notes
 
-- Prefer temp files for the manifest, body text, and JSON payload.
+- Prefer unique files in the system temp dir for the manifest, body text, and JSON payload.
 - If the diff changed after mapping, redo the mapping before posting.
 
 ## Example user intents for this skill

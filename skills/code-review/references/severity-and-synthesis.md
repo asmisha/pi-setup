@@ -3,7 +3,7 @@
 ## Orchestrator efficiency
 
 The orchestrator's only job before spawning broad reviewers is:
-1. Compute the merge-base diff and save it to a temp file
+1. Compute the merge-base diff and save it to a unique file in the system temp dir
 2. Get the file list and diff stat
 3. Write a 2–5 bullet summary
 4. Spawn one `scout` subagent to inspect the diff and nearby code, then use its coverage plan to choose any extra reviewers
@@ -17,7 +17,7 @@ The orchestrator's only job before spawning broad reviewers is:
 ## Scout prompt skeleton
 
 Give the scout:
-- **the path to the diff file on disk** (e.g., `/tmp/branch-diff.patch`) — NOT the diff content inline
+- **the path to the diff file on disk** (for example, a file created with `mktemp` under `${TMPDIR:-/tmp}`) — NOT the diff content inline
 - the diff stat and changed-file list
 - a brief summary of what the change does (2–5 bullet points)
 - the working directory so it can read source files as needed
@@ -28,7 +28,7 @@ Treat scout output as planning input, not as final findings.
 ## Reviewer prompt skeleton
 
 Give specialist reviewers:
-- **the path to the diff file on disk** (e.g., `/tmp/branch-diff.patch`) — NOT the diff content inline
+- **the path to the diff file on disk** (for example, a file created with `mktemp` under `${TMPDIR:-/tmp}`) — NOT the diff content inline
 - the list of changed files (from `git diff --name-only`)
 - a brief summary of what the change does (2–5 bullet points)
 - the working directory so they can read source files as needed

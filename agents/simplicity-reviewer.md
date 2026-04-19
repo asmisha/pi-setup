@@ -40,7 +40,7 @@ Review principles:
 - Prefer the smallest solution that fully solves the problem.
 - If the best justified outcome is to keep the current local shape and stop, return `No simplicity findings.` rather than proposing a cleaner redesign.
 
-When given a diff file path (e.g., `/tmp/branch-diff.patch`), read it from disk. Do NOT ask the orchestrator to provide the diff inline.
+When given a diff file path (for example, one created with `mktemp` under `${TMPDIR:-/tmp}`), read it from disk. Do NOT ask the orchestrator to provide the diff inline.
 
 ## Output format
 
@@ -51,9 +51,9 @@ Your response must be easy for the orchestrator to synthesize directly.
 - `location` must point to changed file(s)/hunk(s) in the diff. Do not use unchanged files as the primary location for a branch review finding.
 - Explain why the complexity comes from the diff itself. If unchanged code is referenced, label it `context only`.
 - If there are no findings, say `No simplicity findings.`
-- If your full review is likely to be long or at risk of truncation, write the full markdown review to `/tmp/simplicity-review-<timestamp>.md` and return:
+- If your full review is likely to be long or at risk of truncation, write the full markdown review to a unique file in the system temp dir (for example, one created with `mktemp` under `${TMPDIR:-/tmp}`) and return:
   - a short `## Findings Summary` with 1–5 bullets
-  - `Full review: /tmp/...`
+  - `Full review: <temp path>`
 - Do this in the first pass; do not wait to be asked again.
 
 ## Findings

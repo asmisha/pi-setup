@@ -12,9 +12,11 @@ Use this skill when work is driven by a Google Doc.
 Prefer the local CLI wrapper first:
 
 ```bash
+PI_TMP_DIR="${TMPDIR:-/tmp}"
+DOC_HTML_FILE="$(mktemp "$PI_TMP_DIR/gdoc-html.XXXXXX")"
 gdocs whoami
 gdocs cat <doc-url-or-id>
-gdocs export <doc-url-or-id> --mime-type text/html -o /tmp/doc.html
+gdocs export <doc-url-or-id> --mime-type text/html -o "$DOC_HTML_FILE"
 ```
 
 If auth is missing or scopes are insufficient:
@@ -43,13 +45,17 @@ curl -sS \
 2. Also check Docs suggestions by comparing these two views:
 
 ```bash
+PI_TMP_DIR="${TMPDIR:-/tmp}"
+DOC_WITHOUT_FILE="$(mktemp "$PI_TMP_DIR/gdoc-without.XXXXXX")"
+DOC_ACCEPTED_FILE="$(mktemp "$PI_TMP_DIR/gdoc-accepted.XXXXXX")"
+
 curl -sS -H "Authorization: Bearer $TOKEN" \
   "https://docs.googleapis.com/v1/documents/${DOC_ID}?suggestionsViewMode=PREVIEW_WITHOUT_SUGGESTIONS" \
-  -o /tmp/doc_without.json
+  -o "$DOC_WITHOUT_FILE"
 
 curl -sS -H "Authorization: Bearer $TOKEN" \
   "https://docs.googleapis.com/v1/documents/${DOC_ID}?suggestionsViewMode=PREVIEW_SUGGESTIONS_ACCEPTED" \
-  -o /tmp/doc_accepted.json
+  -o "$DOC_ACCEPTED_FILE"
 ```
 
 If Drive comments are empty, there may still be inline suggestions in the Docs API.

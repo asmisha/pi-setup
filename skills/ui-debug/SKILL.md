@@ -23,7 +23,7 @@ Do **not** perform Playwright browser actions directly in the main thread unless
 1. main thread defines the debugging question
 2. subagent performs the browser manipulation / inspection work
 3. subagent returns a concise summary with only the evidence needed by the main thread
-4. if the subagent needs to preserve large raw artifacts, it should write them to temp files and return only the file paths
+4. if the subagent needs to preserve large raw artifacts, it should write them to unique files in the system temp dir and return only the file paths
 5. main thread decides the next step or launches another focused subagent
 
 Prefer multiple small, focused subagent runs over one long browser session in the main thread. If you need to inspect several hypotheses, spawn separate subagents so each one can explore a narrow question and return compressed findings.
@@ -56,7 +56,7 @@ Run this workflow inside a subagent whenever possible.
 6. Use `browser_eval` only for small targeted checks that are hard to read from the snapshot.
 7. Re-run `browser_snapshot` or `browser_screenshot` after each meaningful interaction.
 8. Compress findings before returning: summarize the relevant DOM state, errors, visual regressions, and reproduction result instead of pasting large raw outputs back into the parent thread.
-9. If large raw artifacts must be preserved without summarization, write them to temp files and return the file paths instead of inlining them in the parent thread. This includes screenshots, screenshot analyses, long HTML/DOM extracts, and other bulky evidence.
+9. If large raw artifacts must be preserved without summarization, write them to unique files in the system temp dir and return the file paths instead of inlining them in the parent thread. This includes screenshots, screenshot analyses, long HTML/DOM extracts, and other bulky evidence.
 10. When done, call `browser_close` so the next task starts from a clean browser state.
 
 ## Tool guide
@@ -77,7 +77,7 @@ Run this workflow inside a subagent whenever possible.
 - If a page changes after an action, wait explicitly before concluding it is broken.
 - Treat screenshots and snapshots as evidence; report observed behavior, not guesses.
 - Keep raw browser output out of the parent thread whenever possible. Subagents should return concise findings, relevant selectors, short excerpts, and file/artifact references rather than dumping long HTML or repeated snapshots.
-- If a subagent must preserve large unsummarized outputs, store them in temp files and return only the filenames / file paths. Use this for screenshots, image analyses, long HTML/DOM dumps, accessibility extracts, or any other bulky evidence.
+- If a subagent must preserve large unsummarized outputs, store them in unique files in the system temp dir and return only the filenames / file paths. Use this for screenshots, image analyses, long HTML/DOM dumps, accessibility extracts, or any other bulky evidence.
 - If HTML/DOM inspection is needed, extract only the specific nodes, attributes, or text relevant to the hypothesis being tested.
 - If screenshot review is needed, have the subagent describe only the important visual differences or failures.
 - If the browser tools are unavailable, check setup, then run `/reload`.

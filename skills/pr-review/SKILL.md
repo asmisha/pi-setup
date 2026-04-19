@@ -67,10 +67,12 @@ Use the verified base branch, not an assumption, when possible.
 Prepare the diff exactly as the `code-review` skill expects:
 
 ```bash
+PI_TMP_DIR="${TMPDIR:-/tmp}"
+DIFF_FILE="$(mktemp "$PI_TMP_DIR/branch-review.XXXXXX")"
 BASE=$(git merge-base origin/main HEAD)
- git diff "$BASE..HEAD" > /tmp/branch-review.diff
- git diff --stat "$BASE..HEAD" | head -n 200
- git diff --name-only "$BASE..HEAD" | head -n 200
+git diff "$BASE..HEAD" > "$DIFF_FILE"
+git diff --stat "$BASE..HEAD" | head -n 200
+git diff --name-only "$BASE..HEAD" | head -n 200
 ```
 
 If the actual base branch is not `origin/main`, replace it with the verified base ref, for example:
@@ -148,7 +150,7 @@ Call out uncertainty explicitly instead of guessing.
 
 - Use bounded shell output only.
 - Use `read` for files instead of `cat`.
-- Save the diff to a temp file and pass the file path to reviewers.
+- Save the diff to a unique file in the system temp dir and pass the file path to reviewers.
 
 ## Example user intents for this skill
 

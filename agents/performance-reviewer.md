@@ -32,7 +32,7 @@ Review for:
 
 Prefer concrete evidence from the changed code path over generic advice. For branch reviews, only report performance issues introduced or materially worsened by the diff.
 
-When given a diff file path (e.g., `/tmp/branch-diff.patch`), read it from disk. Do NOT ask the orchestrator to provide the diff inline.
+When given a diff file path (for example, one created with `mktemp` under `${TMPDIR:-/tmp}`), read it from disk. Do NOT ask the orchestrator to provide the diff inline.
 
 ## Output format
 
@@ -43,9 +43,9 @@ Your response must be easy for the orchestrator to synthesize directly.
 - `location` must point to changed file(s)/hunk(s) in the diff. Do not use unchanged files as the primary location for a branch review finding.
 - `evidence` must explicitly connect the changed hunk to the performance issue. If unchanged code is referenced, label it `context only`.
 - If there are no findings, say `No performance findings.`
-- If your full review is likely to be long or at risk of truncation, write the full markdown review to `/tmp/performance-review-<timestamp>.md` and return:
+- If your full review is likely to be long or at risk of truncation, write the full markdown review to a unique file in the system temp dir (for example, one created with `mktemp` under `${TMPDIR:-/tmp}`) and return:
   - a short `## Findings Summary` with 1–5 bullets
-  - `Full review: /tmp/...`
+  - `Full review: <temp path>`
 - Do this in the first pass; do not wait to be asked again.
 
 ## Findings

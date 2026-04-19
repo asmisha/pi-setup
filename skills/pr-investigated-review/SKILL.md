@@ -68,8 +68,10 @@ Use the verified base branch, not an assumption, when possible.
 Prepare the diff in the same merge-base form that `pr-review` and `code-review` expect:
 
 ```bash
+PI_TMP_DIR="${TMPDIR:-/tmp}"
+DIFF_FILE="$(mktemp "$PI_TMP_DIR/branch-review.XXXXXX")"
 BASE=$(git merge-base origin/main HEAD)
-git diff "$BASE..HEAD" > /tmp/branch-review.diff
+git diff "$BASE..HEAD" > "$DIFF_FILE"
 git diff --stat "$BASE..HEAD" | head -n 200
 git diff --name-only "$BASE..HEAD" | head -n 200
 ```
@@ -138,7 +140,7 @@ After pass 1, synthesize the reviewer issue lists into one first-pass result:
 
 ### 4. Create a grounded pass-1 handoff artifact
 
-After the first review pass, create a structured temp-file artifact for pass 2.
+After the first review pass, create a structured temp-file artifact in the system temp dir for pass 2.
 
 This artifact must contain only grounded information from pass 1 and directly observed code context.
 
@@ -158,7 +160,7 @@ Rules:
 - it is fine to include leads for pass 2, but label them clearly as leads to verify
 - prefer actionable instructions such as `compare this new path to existing helper X`, `trace authorization from A -> B -> C`, or `inspect how failure handling differs between file1 and file2`
 
-Save this handoff artifact to a temp file and keep the path.
+Save this handoff artifact to a unique temp file in the system temp dir and keep the path.
 
 ### 5. Generate the second-pass review brief
 
@@ -172,7 +174,7 @@ Give it:
 - the pass-1 handoff artifact path
 - the review worktree cwd
 
-The subagent must produce a concise second-pass review brief in a temp file with this structure:
+The subagent must produce a concise second-pass review brief in a unique temp file in the system temp dir with this structure:
 
 - `## Review scope`
 - `## Verified context from pass 1`
@@ -296,7 +298,7 @@ Call out uncertainty explicitly instead of guessing.
 
 - Use bounded shell output only.
 - Use `read` for files instead of `cat`.
-- Save the diff, pass-1 handoff artifact, and second-pass review brief to temp files and pass file paths to the relevant subagents.
+- Save the diff, pass-1 handoff artifact, and second-pass review brief to unique files in the system temp dir and pass file paths to the relevant subagents.
 - Use a fresh context for each issue-investigator so one suspected issue does not contaminate another.
 
 ## Example user intents for this skill

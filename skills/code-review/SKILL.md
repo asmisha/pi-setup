@@ -15,10 +15,12 @@ Use this skill when the goal is to find real problems in code changes, not to ru
 - If the base branch is unclear, inspect it and state the assumption.
 - For branch diffs, always diff against the **merge base**:
   ```bash
+  PI_TMP_DIR="${TMPDIR:-/tmp}"
+  DIFF_FILE="$(mktemp "$PI_TMP_DIR/branch-review.XXXXXX")"
   BASE=$(git merge-base origin/main HEAD)
-  git diff $BASE..HEAD > /tmp/branch-review.diff
-  git diff --stat $BASE..HEAD | head -n 200
-  git diff --name-only $BASE..HEAD | head -n 200
+  git diff "$BASE..HEAD" > "$DIFF_FILE"
+  git diff --stat "$BASE..HEAD" | head -n 200
+  git diff --name-only "$BASE..HEAD" | head -n 200
   ```
 - Write a **2–5 bullet summary** of what the change does based on the stat and file list.
 - **Do NOT** do a broad source review yourself. After you prepare the diff, the next inspection step must be a single `scout` subagent pass.
@@ -29,7 +31,7 @@ Use this skill when the goal is to find real problems in code changes, not to ru
 Before launching the core reviewers or any extra targeted reviewers, spawn exactly one `scout` subagent.
 
 Give the scout:
-- The path to the diff file on disk (e.g., `/tmp/branch-review.diff`)
+- The path to the diff file on disk (for example, `$DIFF_FILE` created in the system temp dir)
 - The diff stat and changed-file list
 - Your 2–5 bullet summary of the change
 - The working directory / cwd
@@ -68,7 +70,7 @@ Common triggers for extra reviewers include:
 - domain-specific surfaces where a narrower specialist would catch more than another generic pass
 
 Give each subagent:
-- The path to the diff file on disk (e.g., `/tmp/branch-review.diff`)
+- The path to the diff file on disk (for example, `$DIFF_FILE` created in the system temp dir)
 - The list of changed files
 - A brief summary of the change (2–5 bullets)
 - The working directory / cwd
@@ -78,7 +80,7 @@ For each extra reviewer, explicitly say why it was chosen, what non-overlapping 
 **Do NOT** include diff content, file contents, or unverified scout conclusions in the task text.
 **Do NOT** use the generic `reviewer` agent as a redundant broad pass or as a substitute for the core four. Extra reviewers must be narrowly targeted specialists.
 - In each subagent task, explicitly require a concise final answer that the orchestrator can synthesize directly: priority, file/line, issue, impact.
-- If a reviewer expects a long output or risks truncation, have it write the full findings to a temp file and return a short summary plus the file path in the same first pass.
+- If a reviewer expects a long output or risks truncation, have it write the full findings to a unique temp file in the system temp dir and return a short summary plus the file path in the same first pass.
 - If one reviewer response comes back truncated or incomplete, recover that reviewer’s findings from its returned temp-file path instead of launching a second broad review pass or re-reviewing the diff yourself.
 
 ### 4. Synthesize without losing issues

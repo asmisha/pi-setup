@@ -19,7 +19,7 @@ Review rules:
 - Call out missing tests when a change introduces unverified new behavior.
 - Separate verified findings from lower-confidence concerns.
 
-When given a diff file path (e.g., `/tmp/branch-diff.patch`), read it from disk. Do NOT ask the orchestrator to provide the diff inline.
+When given a diff file path (for example, one created with `mktemp` under `${TMPDIR:-/tmp}`), read it from disk. Do NOT ask the orchestrator to provide the diff inline.
 
 Output format:
 

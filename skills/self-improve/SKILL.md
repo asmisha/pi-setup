@@ -15,7 +15,16 @@ Context window tokens are precious. Every byte in a prompt must earn its place. 
 
 ### 1. Gather evidence (orchestrator)
 
-Collect the following and write them to temp files:
+Collect the following and write them to unique files in the system temp dir. Start by defining reusable temp paths:
+
+```bash
+PI_TMP_DIR="${TMPDIR:-/tmp}"
+SESSION_TAIL_FILE="$(mktemp "$PI_TMP_DIR/self-improve-session.XXXXXX")"
+ARTIFACT_LIST_FILE="$(mktemp "$PI_TMP_DIR/self-improve-artifacts.XXXXXX")"
+PROMPT_FILE_LIST="$(mktemp "$PI_TMP_DIR/self-improve-prompts.XXXXXX")"
+ANALYSIS_FILE="$(mktemp "$PI_TMP_DIR/self-improve-analysis.XXXXXX")"
+PROPOSAL_FILE="$(mktemp "$PI_TMP_DIR/self-improve-proposal.XXXXXX")"
+```
 
 **a) Recent session context:**
 ```bash
@@ -25,10 +34,10 @@ ls -t "$SESSION_DIR"/*.jsonl | head -1
 ```
 
 **b) Extract the relevant conversation tail:**
-Use `tail` on the session .jsonl to get the last ~100 lines (recent turns). Write to `/tmp/self-improve-session.jsonl`.
+Use `tail` on the session .jsonl to get the last ~100 lines (recent turns). Write to `$SESSION_TAIL_FILE`.
 
 **c) Gather subagent artifacts from the session:**
-List recent subagent artifacts (inputs, outputs, meta) sorted by time. Write paths to `/tmp/self-improve-artifacts.txt`.
+List recent subagent artifacts (inputs, outputs, meta) sorted by time. Write paths to `$ARTIFACT_LIST_FILE`.
 ```bash
 ls -lt ~/.pi/agent/sessions/*/subagent-artifacts/*_meta.json | head -20
 ```
@@ -42,15 +51,16 @@ The user's most recent message(s) expressing dissatisfaction — extract the spe
 - Any skill SKILL.md files that were loaded (check subagent meta for `skills` field)
 - Any agent .md files that were used (check subagent meta for `agent` field, then read `~/.pi/agent/agents/<agent>.md`)
 
-Write the list of active prompt files and their paths to `/tmp/self-improve-prompts.txt`.
+Write the list of active prompt files and their paths to `$PROMPT_FILE_LIST`.
 
 ### 2. Delegate root cause analysis
 
 Launch a **single subagent** with `model: openai-codex/gpt-5.4` and thinking enabled. Give it:
-- Path to the session tail (`/tmp/self-improve-session.jsonl`)
+- Path to the session tail temp file (`$SESSION_TAIL_FILE`)
 - Paths to relevant subagent artifacts (inputs + outputs that relate to the failure)
 - The user's feedback text
 - Paths to all prompt files that were active
+- Analysis output path (`$ANALYSIS_FILE`)
 
 The subagent's task:
 
@@ -62,6 +72,7 @@ You are analyzing why an AI agent session produced a result the user is unhappy 
 - Subagent artifacts: {artifact_paths}
 - User feedback: "{feedback_text}"
 - Active prompt files: {prompt_file_paths}
+- Analysis output path: {analysis_file}
 
 ## Your job
 
@@ -79,7 +90,7 @@ For each identified issue:
 
 ## Output format
 
-Write your analysis to /tmp/self-improve-analysis.md with this structure:
+Write your analysis to {analysis_file} with this structure:
 
 ### Root Cause Analysis
 
@@ -96,9 +107,10 @@ For each issue found:
 ### 3. Delegate change proposal
 
 After root cause analysis completes, launch another subagent with `model: openai-codex/gpt-5.4` and thinking enabled. Give it:
-- The analysis from step 2 (`/tmp/self-improve-analysis.md`)
+- The analysis from step 2 (`$ANALYSIS_FILE`)
 - Paths to all active prompt files (so it can read current content)
 - The user's original feedback
+- Proposal output path (`$PROPOSAL_FILE`)
 
 The subagent's task:
 
@@ -106,9 +118,10 @@ The subagent's task:
 You are proposing precise prompt edits to fix agent behavior issues.
 
 ## Inputs
-- Root cause analysis: /tmp/self-improve-analysis.md
+- Root cause analysis: {analysis_file}
 - Active prompt files: {prompt_file_paths}
 - User feedback: "{feedback_text}"
+- Proposal output path: {proposal_file}
 
 ## Constraints
 
@@ -122,7 +135,7 @@ You are proposing precise prompt edits to fix agent behavior issues.
 
 ## Output format
 
-Write to /tmp/self-improve-proposal.md:
+Write to {proposal_file}:
 
 ### Proposed Changes
 
@@ -146,7 +159,7 @@ For each change:
 
 ### 4. Present to user (orchestrator)
 
-Read `/tmp/self-improve-proposal.md` and present it to the user. For each proposed change:
+Read `$PROPOSAL_FILE` and present it to the user. For each proposed change:
 - Show the file, the current text, and the proposed replacement
 - Show the net token impact
 - Show the rationale

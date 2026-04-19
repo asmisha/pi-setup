@@ -48,7 +48,7 @@ Inside the review worktree:
 - verify the PR base branch
 - fetch the base branch
 - compute the merge base with the checked out PR head
-- save the diff to a temp file
+- save the diff to a unique file in the system temp dir
 - collect the diff stat and changed file list
 
 Use the verified base branch, not an assumption, when possible.
@@ -56,8 +56,10 @@ Use the verified base branch, not an assumption, when possible.
 Use the same merge-base diff shape as `pr-review` and `code-review`:
 
 ```bash
+PI_TMP_DIR="${TMPDIR:-/tmp}"
+DIFF_FILE="$(mktemp "$PI_TMP_DIR/branch-review.XXXXXX")"
 BASE=$(git merge-base origin/main HEAD)
-git diff "$BASE..HEAD" > /tmp/branch-review.diff
+git diff "$BASE..HEAD" > "$DIFF_FILE"
 git diff --stat "$BASE..HEAD" | head -n 200
 git diff --name-only "$BASE..HEAD" | head -n 200
 ```
@@ -93,7 +95,7 @@ In both passes, treat maintainability / poor-code concerns as first-class review
 
 ### 4. Create a first-pass handoff artifact
 
-After the first review cycle, create a structured temp-file artifact for the second cycle.
+After the first review cycle, create a structured temp-file artifact in the system temp dir for the second cycle.
 
 This artifact must contain only grounded information from the first cycle and directly observed code context.
 
@@ -114,7 +116,7 @@ Rules:
 - Prefer actionable instructions such as `compare this new path to existing helper X`, `trace authorization from A -> B -> C`, or `inspect how failure handling differs between file1 and file2`.
 - When pass 1 finds likely poor-code patterns, record them in concrete terms: what is duplicated, where contracts diverge, what abstraction is misleading, and what future bug or maintenance cost that creates.
 
-Save this handoff artifact to a temp file and keep the path.
+Save this handoff artifact to a unique temp file in the system temp dir and keep the path.
 
 ### 5. Generate the second-pass review brief with a dedicated subagent
 
@@ -128,7 +130,7 @@ Give it:
 - the first-pass handoff artifact path
 - the review worktree cwd
 
-The subagent must produce a concise second-pass review brief in a temp file with this structure:
+The subagent must produce a concise second-pass review brief in a unique temp file in the system temp dir with this structure:
 
 - `## Review scope`
 - `## Verified context from pass 1`
@@ -226,7 +228,7 @@ Call out uncertainty explicitly instead of guessing.
 
 - Use bounded shell output only.
 - Use `read` for files instead of `cat`.
-- Save the diff and both handoff artifacts to temp files and pass file paths to subagents.
+- Save the diff and both handoff artifacts to unique files in the system temp dir and pass file paths to subagents.
 
 ## Example user intents for this skill
 

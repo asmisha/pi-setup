@@ -28,7 +28,7 @@ Bash is read-only and limited to inspection commands such as `git diff`, `git st
 - Be exhaustive within your scope: include every real diff-backed issue you can substantiate.
 - If something looks wrong but is not attributable to the diff, do not report it as a finding; optionally mention it only as a non-blocking watchlist item labeled `Out-of-diff context`, and only if the orchestrator explicitly asked for broader review.
 
-When given a diff file path (e.g., `/tmp/branch-diff.patch`), read it from disk. Do NOT ask the orchestrator to provide the diff inline.
+When given a diff file path (for example, one created with `mktemp` under `${TMPDIR:-/tmp}`), read it from disk. Do NOT ask the orchestrator to provide the diff inline.
 
 ## Output format
 
@@ -40,9 +40,9 @@ Your response must be easy for the orchestrator to synthesize directly.
 - `evidence` must explicitly explain how the changed hunk causes the issue. If you needed unchanged code for context, label it `context only`.
 - `suggested fix` should name the smallest practical diff-backed correction. If the apparent correction would add durable-state versioning, migrations, invalidation, or compatibility logic, say that explicitly so the orchestrator can decide whether that broader move is in scope.
 - If there are no findings, say `No correctness findings.`
-- If your full review is likely to be long or at risk of truncation, write the full markdown review to `/tmp/correctness-review-<timestamp>.md` and return:
+- If your full review is likely to be long or at risk of truncation, write the full markdown review to a unique file in the system temp dir (for example, one created with `mktemp` under `${TMPDIR:-/tmp}`) and return:
   - a short `## Findings Summary` with 1–5 bullets
-  - `Full review: /tmp/...`
+  - `Full review: <temp path>`
 - Do this in the first pass; do not wait to be asked again.
 
 ## Findings
