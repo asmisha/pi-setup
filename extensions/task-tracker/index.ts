@@ -1,15 +1,12 @@
-import { complete } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@mariozechner/pi-coding-agent";
-import { buildSessionContext, convertToLlm, serializeConversation } from "@mariozechner/pi-coding-agent";
 import { applyTaskTrackerAction } from "./src/actions.ts";
-import { loadLedgerEvents, serializeEventData, extractAdvisoryFromCompactionDetails } from "./src/branch-store.ts";
+import { loadLedgerEvents, serializeEventData } from "./src/branch-store.ts";
 import { buildBootstrapEvents, buildExplicitAskCaptureContract } from "./src/bootstrap.ts";
-import { buildCompactionPrompt, COMPACTION_SYSTEM_PROMPT, normalizeAdvisory, parseJsonObject, renderAdvisorySummary } from "./src/compaction.ts";
-import { ENV_ENABLE_FLAG, isExtensionEnabled, MAX_INFERRED_TASKS_PER_TURN, MIN_COMPACTION_INTERVAL_MS, SOFT_COMPACTION_THRESHOLD_PERCENT, SUMMARY_MAX_TOKENS } from "./src/config.ts";
+import { isSubagentProcess, MAX_INFERRED_TASKS_PER_TURN } from "./src/config.ts";
 import { explainTaskDone, explainTaskOpen, renderProjectedState, renderRecentLedgerEventsText } from "./src/debug.ts";
-import { latestContractProposals, projectLedger } from "./src/projector.ts";
+import { projectLedger } from "./src/projector.ts";
 import { renderActiveWorkPacket } from "./src/prompt.ts";
-import type { CompactionAdvisory, KnownLedgerEvent, ProjectedState, TaskTrackerAction } from "./src/types.ts";
+import type { KnownLedgerEvent, ProjectedState, TaskTrackerAction } from "./src/types.ts";
 import { ENTRY_TYPES } from "./src/types.ts";
 import { makeEventMeta, isLowSignalUserNudge } from "./src/utils.ts";
 import { buildTodoWidgetSnapshot, renderTodoWidgetText, type TodoWidgetSnapshot } from "./src/widget.ts";
@@ -31,16 +28,6 @@ function refreshProjectedState(branchEntries: SessionEntry[]): { events: KnownLe
   };
 }
 
-function latestLedgerAdvisory(events: KnownLedgerEvent[]): CompactionAdvisory | null {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event.type === ENTRY_TYPES.advisoryStored) {
-      return event.payload.advisory;
-    }
-  }
-  return null;
-}
-
 function persistEvents(pi: ExtensionAPI, currentEvents: KnownLedgerEvent[], newEvents: KnownLedgerEvent[]) {
   for (const event of newEvents) {
     pi.appendEntry(event.type, serializeEventData(event));
@@ -52,34 +39,12 @@ function persistEvents(pi: ExtensionAPI, currentEvents: KnownLedgerEvent[], newE
   };
 }
 
-function latestUserIntentFromState(state: ProjectedState): string | null {
-  const latestAsk = state.contract?.explicitAsks.filter((ask) => ask.status === "open").at(-1)?.text;
-  return latestAsk ?? state.contract?.activeObjective ?? null;
-}
-
-function extractFilePaths(fileOps: unknown): string[] {
-  if (!Array.isArray(fileOps)) return [];
-  const paths = fileOps
-    .map((item) => {
-      if (!item || typeof item !== "object") return null;
-      const record = item as Record<string, unknown>;
-      const path = record.path ?? record.file ?? record.filePath;
-      return typeof path === "string" ? path.trim() : null;
-    })
-    .filter((item): item is string => Boolean(item));
-  return [...new Set(paths)];
-}
-
 function formatStageLabel(stage: ProjectedState["execution"]["stage"]): string {
   return stage.replace(/_/g, " ");
 }
 
 function countLabel(count: number, label: string): string {
   return `${count} ${label}`;
-}
-
-function askCountLabel(count: number): string {
-  return `${count} ${count === 1 ? "ask" : "asks"}`;
 }
 
 function widgetModeColor(mode: TodoWidgetSnapshot["mode"]): "accent" | "warning" | "error" {
@@ -97,7 +62,6 @@ function renderSummaryBits(ctx: ExtensionContext, snapshot: TodoWidgetSnapshot):
   if (snapshot.counts.open > 0) bits.push(theme.fg("text", countLabel(snapshot.counts.open, "open")));
   if (snapshot.counts.done > 0) bits.push(theme.fg("muted", countLabel(snapshot.counts.done, "done")));
   if (snapshot.counts.doneCandidate > 0) bits.push(theme.fg("warning", countLabel(snapshot.counts.doneCandidate, "ready")));
-  if (snapshot.counts.openAsks > 0) bits.push(theme.fg("warning", askCountLabel(snapshot.counts.openAsks)));
   return bits;
 }
 
@@ -110,7 +74,7 @@ function renderThemedTodoWidgetLines(ctx: ExtensionContext, snapshot: TodoWidget
   if (rawLines.length === 0) return [];
 
   const summaryBits = renderSummaryBits(ctx, snapshot);
-  const badge = theme.bg("selectedBg", theme.fg("accent", " CG2 "));
+  const badge = theme.bg("selectedBg", theme.fg("accent", " Tasks "));
   const header = `${badge} ${theme.fg(modeColor, theme.bold(formatStageLabel(snapshot.stage)))}${summaryBits.length > 0 ? ` ${theme.fg("dim", "·")} ${summaryBits.join(` ${theme.fg("dim", "·")} `)}` : ""}`;
 
   return rawLines.map((line, index) => {
@@ -149,16 +113,10 @@ function renderThemedTodoWidgetLines(ctx: ExtensionContext, snapshot: TodoWidget
   });
 }
 
-export default function contextGuardianV2(pi: ExtensionAPI) {
-  if (!isExtensionEnabled()) {
-    return;
-  }
-
+export default function taskTrackerExtension(pi: ExtensionAPI) {
+  const subagentProcess = isSubagentProcess();
   let currentEvents: KnownLedgerEvent[] = [];
   let currentState: ProjectedState = projectLedger([]);
-  let previousContextPercent: number | null = null;
-  let compactionInFlight = false;
-  let lastCompactionAt = 0;
   let createdInferredTasksThisTurn = 0;
   const nextId = createIdGenerator();
 
@@ -169,11 +127,11 @@ export default function contextGuardianV2(pi: ExtensionAPI) {
   };
 
   const updateUi = (ctx: ExtensionContext) => {
-    if (!ctx.hasUI) return;
+    if (subagentProcess || !ctx.hasUI) return;
     const snapshot = buildTodoWidgetSnapshot(currentState);
-    ctx.ui.setStatus("cg2-todo", undefined);
+    ctx.ui.setStatus("task-tracker-todo", undefined);
     const widgetLines = renderThemedTodoWidgetLines(ctx, snapshot);
-    ctx.ui.setWidget("cg2-todo", widgetLines.length > 0 ? widgetLines : undefined);
+    ctx.ui.setWidget("task-tracker-todo", widgetLines.length > 0 ? widgetLines : undefined);
   };
 
   const ensureBootstrapped = (prompt: string) => {
@@ -200,42 +158,24 @@ export default function contextGuardianV2(pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     refreshBranch(ctx.sessionManager.getBranch());
-    previousContextPercent = null;
-    compactionInFlight = false;
     createdInferredTasksThisTurn = 0;
     updateUi(ctx);
   });
 
   pi.on("session_tree", async (_event, ctx) => {
     refreshBranch(ctx.sessionManager.getBranch());
-    previousContextPercent = null;
     createdInferredTasksThisTurn = 0;
     updateUi(ctx);
   });
 
-  pi.on("session_compact", async (event, ctx) => {
+  pi.on("session_compact", async (_event, ctx) => {
     refreshBranch(ctx.sessionManager.getBranch());
-    previousContextPercent = null;
-    compactionInFlight = false;
-    lastCompactionAt = Date.now();
-
-    const advisory = extractAdvisoryFromCompactionDetails(event.compactionEntry.details, new Date().toISOString());
-    const existing = latestLedgerAdvisory(currentEvents);
-    if (advisory && existing?.updatedAt !== advisory.updatedAt) {
-      const advisoryEvent: KnownLedgerEvent = {
-        type: ENTRY_TYPES.advisoryStored,
-        ...makeEventMeta("system", "advisory", advisory.updatedAt),
-        payload: { advisory },
-      };
-      const persisted = persistEvents(pi, currentEvents, [advisoryEvent]);
-      currentEvents = persisted.events;
-      currentState = persisted.state;
-    }
-
+    if (subagentProcess) return;
     updateUi(ctx);
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
+    if (subagentProcess) return;
     refreshBranch(ctx.sessionManager.getBranch());
     createdInferredTasksThisTurn = 0;
     ensureBootstrapped(event.prompt);
@@ -243,114 +183,22 @@ export default function contextGuardianV2(pi: ExtensionAPI) {
     updateUi(ctx);
 
     return {
-      systemPrompt: `${event.systemPrompt}\n\n## Context Guardian v2 Active Work Packet\n${renderActiveWorkPacket(currentState)}`,
+      systemPrompt: `${event.systemPrompt}\n\n## Task Tracker Active Work Packet\n${renderActiveWorkPacket(currentState)}`,
     };
   });
 
-  pi.on("turn_end", async (event, ctx) => {
-    const usage = ctx.getContextUsage();
-    const currentPercent = usage?.percent ?? null;
-    if (currentPercent === null) {
-      previousContextPercent = null;
-      return;
-    }
-
-    const crossedThreshold = previousContextPercent === null
-      ? currentPercent >= SOFT_COMPACTION_THRESHOLD_PERCENT
-      : previousContextPercent < SOFT_COMPACTION_THRESHOLD_PERCENT && currentPercent >= SOFT_COMPACTION_THRESHOLD_PERCENT;
-    previousContextPercent = currentPercent;
-    if (!crossedThreshold) return;
-    if (compactionInFlight) return;
-    if (Date.now() - lastCompactionAt < MIN_COMPACTION_INTERVAL_MS) return;
-
-    const shouldAutoResume = Array.isArray(event.toolResults) && event.toolResults.length > 0;
-
-    compactionInFlight = true;
-    ctx.compact({
-      customInstructions: "Generate an advisory packet for Context Guardian v2. Keep contract/task truth separate from advisory.",
-      onComplete: () => {
-        compactionInFlight = false;
-        lastCompactionAt = Date.now();
-        previousContextPercent = null;
-        if (shouldAutoResume) {
-          pi.sendUserMessage("continue");
-        }
-      },
-      onError: () => {
-        compactionInFlight = false;
-        previousContextPercent = null;
-      },
-    });
-  });
-
-  pi.on("session_before_compact", async (event, ctx) => {
-    refreshBranch(event.branchEntries);
-    if (!ctx.model) return;
-    const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
-    if (!auth.ok || !auth.apiKey) return;
-
-    const messages = buildSessionContext(event.branchEntries).messages;
-    const serializedConversation = serializeConversation(convertToLlm(messages));
-    const prompt = buildCompactionPrompt({
-      projectedState: currentState,
-      serializedConversation,
-      latestUserIntent: latestUserIntentFromState(currentState),
-      customInstructions: event.customInstructions,
-      isSplitTurn: event.preparation.isSplitTurn,
-    });
-
-    try {
-      const response = await complete(
-        ctx.model,
-        {
-          systemPrompt: COMPACTION_SYSTEM_PROMPT,
-          messages: [{ role: "user", content: [{ type: "text", text: prompt }], timestamp: Date.now() }],
-        },
-        {
-          apiKey: auth.apiKey,
-          headers: auth.headers,
-          maxTokens: SUMMARY_MAX_TOKENS,
-          signal: event.signal,
-        },
-      );
-      const responseText = response.content
-        .filter((item): item is { type: "text"; text: string } => item.type === "text")
-        .map((item) => item.text)
-        .join("\n")
-        .trim();
-      if (!responseText) return;
-
-      const parsed = parseJsonObject(responseText);
-      const advisory = normalizeAdvisory(parsed, new Date().toISOString());
-      if (!advisory) return;
-
-      const touchedFiles = extractFilePaths(event.preparation.fileOps);
-      advisory.relevantFiles = [...new Set([...advisory.relevantFiles, ...touchedFiles])];
-
-      return {
-        compaction: {
-          summary: renderAdvisorySummary(advisory),
-          firstKeptEntryId: event.preparation.firstKeptEntryId,
-          tokensBefore: event.preparation.tokensBefore,
-          details: {
-            advisory,
-            readFiles: touchedFiles,
-            modifiedFiles: touchedFiles,
-          },
-        },
-      };
-    } catch {
-      return;
-    }
-  });
+  if (subagentProcess) {
+    return;
+  }
 
   pi.registerTool({
     name: "task_tracker",
     label: "Task Tracker",
-    description: "Safe task tracker for Context Guardian v2. Uses granular event-sourced updates instead of patching whole state.",
+    description: "Safe task tracker extension. Uses granular event-sourced updates instead of patching whole state.",
     promptSnippet: "Track open tasks, evidence, acceptance, and next actions without rewriting the whole contract.",
     promptGuidelines: [
       "Use this to create or update granular task-tracker events.",
+      "Keep execution.activeTaskIds honest; multiple active sibling tasks are allowed when the work truly splits.",
       "Prefer propose_done + evidence + commit_done over directly declaring success.",
       "If commit_done fully answers an open ask, include askIdsToSatisfy so the ask does not linger open.",
       "Do not treat short acknowledgements as acceptance unless the user was explicit.",
@@ -384,16 +232,40 @@ export default function contextGuardianV2(pi: ExtensionAPI) {
     },
   });
 
-  pi.registerCommand("cg2-state", {
-    description: `Show current projected Context Guardian v2 state (requires ${ENV_ENABLE_FLAG}=1).`,
+  pi.registerCommand("task-state", {
+    description: "Show current projected task tracker state, including contract/proposal summary.",
     handler: async (_args, ctx) => {
       refreshBranch(ctx.sessionManager.getBranch());
       ctx.ui.notify(renderProjectedState(currentState), "info");
     },
   });
 
-  pi.registerCommand("cg2-ledger", {
-    description: "Show recent Context Guardian v2 ledger events",
+  pi.registerCommand("task-clear", {
+    description: "Clear the current task tracker state for this session",
+    handler: async (args, ctx) => {
+      refreshBranch(ctx.sessionManager.getBranch());
+      const reason = args.trim();
+      const event: KnownLedgerEvent = {
+        type: ENTRY_TYPES.stateCleared,
+        ...makeEventMeta("manual", "authoritative", new Date().toISOString()),
+        payload: reason ? { reason } : {},
+      };
+      const persisted = persistEvents(pi, currentEvents, [event]);
+      currentEvents = persisted.events;
+      currentState = persisted.state;
+      createdInferredTasksThisTurn = 0;
+      updateUi(ctx);
+      ctx.ui.notify(
+        reason
+          ? `Task tracker state cleared: ${reason}. The next non-trivial prompt will bootstrap a fresh contract and root task.`
+          : "Task tracker state cleared. The next non-trivial prompt will bootstrap a fresh contract and root task.",
+        "info",
+      );
+    },
+  });
+
+  pi.registerCommand("task-ledger", {
+    description: "Show recent task tracker ledger events",
     handler: async (args, ctx) => {
       refreshBranch(ctx.sessionManager.getBranch());
       const limit = Number.parseInt(args.trim(), 10);
@@ -401,58 +273,43 @@ export default function contextGuardianV2(pi: ExtensionAPI) {
     },
   });
 
-  pi.registerCommand("cg2-why-open", {
+  pi.registerCommand("task-why-open", {
     description: "Explain why a task is still open",
     handler: async (args, ctx) => {
       refreshBranch(ctx.sessionManager.getBranch());
       const taskId = args.trim();
       if (!taskId) {
-        ctx.ui.notify("Usage: /cg2-why-open <taskId>", "error");
+        ctx.ui.notify("Usage: /task-why-open <taskId>", "error");
         return;
       }
       ctx.ui.notify(explainTaskOpen(currentState, taskId), "info");
     },
   });
 
-  pi.registerCommand("cg2-why-done", {
+  pi.registerCommand("task-why-done", {
     description: "Explain how a task was closed",
     handler: async (args, ctx) => {
       refreshBranch(ctx.sessionManager.getBranch());
       const taskId = args.trim();
       if (!taskId) {
-        ctx.ui.notify("Usage: /cg2-why-done <taskId>", "error");
+        ctx.ui.notify("Usage: /task-why-done <taskId>", "error");
         return;
       }
       ctx.ui.notify(explainTaskDone(currentState, taskId), "info");
     },
   });
 
-  pi.registerCommand("cg2-contract", {
-    description: "Show contract and contract change proposals",
-    handler: async (_args, ctx) => {
-      refreshBranch(ctx.sessionManager.getBranch());
-      const contract = currentState.contract;
-      const proposals = latestContractProposals(currentState);
-      ctx.ui.notify([
-        `Active objective: ${contract?.activeObjective ?? "none"}`,
-        `Original objective: ${contract?.originalObjective ?? "none"}`,
-        `Open asks: ${contract?.explicitAsks.filter((ask) => ask.status === "open").map((ask) => ask.id).join(", ") || "none"}`,
-        `Contract proposals: ${proposals.length > 0 ? proposals.map((item) => `${item.id}[${item.status}]`).join(", ") : "none"}`,
-      ].join("\n"), "info");
-    },
-  });
-
-  pi.registerCommand("cg2-handoff", {
-    description: "Create a new session with the current CG2 ledger and an edited handoff prompt",
+  pi.registerCommand("handoff", {
+    description: "Create a new session with the current task tracker ledger and an edited handoff prompt",
     handler: async (args, ctx) => {
       if (!ctx.hasUI) {
-        ctx.ui.notify("cg2-handoff requires interactive mode", "error");
+        ctx.ui.notify("handoff requires interactive mode", "error");
         return;
       }
       refreshBranch(ctx.sessionManager.getBranch());
       const goal = args.trim();
       if (!goal) {
-        ctx.ui.notify("Usage: /cg2-handoff <goal>", "error");
+        ctx.ui.notify("Usage: /handoff <goal>", "error");
         return;
       }
 
@@ -480,7 +337,7 @@ export default function contextGuardianV2(pi: ExtensionAPI) {
       }
 
       ctx.ui.setEditorText(prompt);
-      ctx.ui.notify("CG2 handoff ready. Submit when ready.", "info");
+      ctx.ui.notify("Task tracker handoff ready. Submit when ready.", "info");
     },
   });
 }

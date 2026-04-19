@@ -30,7 +30,7 @@ export type TodoWidgetSnapshot = {
   note?: string;
 };
 
-const DEFAULT_MAX_TASKS = 4;
+const DEFAULT_MAX_TASKS = 6;
 const MAX_TITLE_LENGTH = 88;
 const MAX_HINT_LENGTH = 104;
 const MAX_TASK_LINE_LENGTH = 116;
@@ -57,14 +57,6 @@ function formatStage(stage: ProjectedState["execution"]["stage"]): string {
 
 function countLabel(count: number, label: string): string {
   return `${count} ${label}`;
-}
-
-function askCountLabel(count: number): string {
-  return `${count} ${count === 1 ? "ask" : "asks"}`;
-}
-
-function pluralize(count: number, singular: string, plural = `${singular}s`): string {
-  return `${count} ${count === 1 ? singular : plural}`;
 }
 
 function isRootObjectiveTask(state: ProjectedState, task: TaskItem): boolean {
@@ -114,7 +106,7 @@ function taskDetail(task: TaskItem): string | null {
 function summarizeMode(snapshot: TodoWidgetSnapshot): string {
   switch (snapshot.mode) {
     case "planning":
-      return snapshot.counts.openAsks > 0 ? `planning · ${askCountLabel(snapshot.counts.openAsks)}` : "planning";
+      return "planning";
     case "waiting":
       return `waiting on user · ${countLabel(snapshot.counts.open, "open")}`;
     case "blocked":
@@ -125,7 +117,6 @@ function summarizeMode(snapshot: TodoWidgetSnapshot): string {
       if (snapshot.counts.open > 0) parts.push(countLabel(snapshot.counts.open, "open"));
       if (snapshot.counts.done > 0) parts.push(countLabel(snapshot.counts.done, "done"));
       if (snapshot.counts.doneCandidate > 0) parts.push(countLabel(snapshot.counts.doneCandidate, "ready"));
-      if (snapshot.counts.openAsks > 0) parts.push(askCountLabel(snapshot.counts.openAsks));
       return parts.join(" · ") || "active";
     }
   }
@@ -139,7 +130,6 @@ function buildSummaryBits(snapshot: TodoWidgetSnapshot): string[] {
   if (snapshot.counts.open > 0) bits.push(countLabel(snapshot.counts.open, "open"));
   if (snapshot.counts.done > 0) bits.push(countLabel(snapshot.counts.done, "done"));
   if (snapshot.counts.doneCandidate > 0) bits.push(countLabel(snapshot.counts.doneCandidate, "ready"));
-  if (snapshot.counts.openAsks > 0) bits.push(askCountLabel(snapshot.counts.openAsks));
   return bits;
 }
 
@@ -228,7 +218,7 @@ export function buildTodoWidgetSnapshot(state: ProjectedState, options?: { maxTa
 
 export function renderTodoStatusText(snapshot: TodoWidgetSnapshot | null): string | null {
   if (!snapshot) return null;
-  return `CG2 · ${summarizeMode(snapshot)}`;
+  return `Tasks · ${summarizeMode(snapshot)}`;
 }
 
 export function renderTodoWidgetText(snapshot: TodoWidgetSnapshot | null): string[] {
@@ -236,7 +226,7 @@ export function renderTodoWidgetText(snapshot: TodoWidgetSnapshot | null): strin
 
   const summaryBits = buildSummaryBits(snapshot);
   const lines: string[] = [
-    `CG2 ${formatStage(snapshot.stage)} · ${summaryBits.join(" · ") || (snapshot.mode === "planning" ? "getting started" : snapshot.mode)}`,
+    `Tasks ${formatStage(snapshot.stage)} · ${summaryBits.join(" · ") || (snapshot.mode === "planning" ? "getting started" : snapshot.mode)}`,
   ];
 
   if (snapshot.latestAsk) {

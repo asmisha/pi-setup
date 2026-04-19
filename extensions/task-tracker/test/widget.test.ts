@@ -7,22 +7,22 @@ import { buildTodoWidgetSnapshot, renderTodoStatusText, renderTodoWidgetText } f
 import { applyAction, bootstrap } from "./helpers.ts";
 
 test("widget shows planning state before explicit subtasks exist", () => {
-  const { state } = bootstrap("Ship CG2 widget");
+  const { state } = bootstrap("Ship task widget");
   const snapshot = buildTodoWidgetSnapshot(state);
   assert(snapshot);
   assert.equal(snapshot.mode, "planning");
-  assert.equal(renderTodoStatusText(snapshot), "CG2 · planning · 1 ask");
+  assert.equal(renderTodoStatusText(snapshot), "Tasks · planning");
 
   const lines = renderTodoWidgetText(snapshot);
-  assert.equal(lines[0], "CG2 planning · 1 ask");
+  assert.equal(lines[0], "Tasks planning · getting started");
   assert.equal(lines.some((line) => line.startsWith("Goal:")), false);
-  assert.equal(lines[1], "Ask: Ship CG2 widget");
+  assert.equal(lines[1], "Ask: Ship task widget");
   assert.ok(lines.includes("Hint: break this into explicit subtasks."));
   assert.equal(lines.some((line) => line.startsWith("Next:")), false);
 });
 
 test("ask label uses singular only for one", () => {
-  const boot = bootstrap("Ship CG2 widget");
+  const boot = bootstrap("Ship task widget");
   const baseContract = boot.state.contract;
   assert.ok(baseContract);
 
@@ -82,13 +82,13 @@ test("ask label uses singular only for one", () => {
   ]);
 
   assert.equal(renderTodoStatusText(buildTodoWidgetSnapshot(zeroAskState)), null);
-  assert.equal(renderTodoStatusText(buildTodoWidgetSnapshot(boot.state)), "CG2 · planning · 1 ask");
-  assert.equal(renderTodoStatusText(buildTodoWidgetSnapshot(twoAskState)), "CG2 · planning · 2 asks");
-  assert.equal(renderTodoStatusText(buildTodoWidgetSnapshot(threeAskState)), "CG2 · planning · 3 asks");
+  assert.equal(renderTodoStatusText(buildTodoWidgetSnapshot(boot.state)), "Tasks · planning");
+  assert.equal(renderTodoStatusText(buildTodoWidgetSnapshot(twoAskState)), "Tasks · planning");
+  assert.equal(renderTodoStatusText(buildTodoWidgetSnapshot(threeAskState)), "Tasks · planning");
 });
 
 test("widget hides the bootstrap root task once explicit subtasks exist", () => {
-  const boot = bootstrap("Ship CG2 widget");
+  const boot = bootstrap("Ship task widget");
   const created = applyAction(
     boot.state,
     { action: "create_task", title: "Implement todo widget", kind: "followup" },
@@ -111,11 +111,11 @@ test("widget hides the bootstrap root task once explicit subtasks exist", () => 
 
   const lines = renderTodoWidgetText(snapshot);
   assert.ok(lines.some((line) => line.includes("Implement todo widget")));
-  assert.equal(lines.some((line) => /^(?:→|•|⛔|\?|✓) Ship CG2 widget$/.test(line)), false);
+  assert.equal(lines.some((line) => /^(?:→|•|⛔|\?|✓) Ship task widget$/.test(line)), false);
 });
 
 test("widget only shows next action once explicit subtasks exist", () => {
-  const boot = bootstrap("Ship CG2 widget");
+  const boot = bootstrap("Ship task widget");
   const created = applyAction(
     boot.state,
     { action: "create_task", title: "Implement todo widget", kind: "followup" },
@@ -128,7 +128,7 @@ test("widget only shows next action once explicit subtasks exist", () => {
 });
 
 test("widget prioritizes blocked tasks and surfaces reasons", () => {
-  const boot = bootstrap("Ship CG2 widget");
+  const boot = bootstrap("Ship task widget");
   const firstCreated = applyAction(
     boot.state,
     { action: "create_task", title: "Implement todo widget", kind: "followup" },
@@ -166,7 +166,7 @@ test("widget prioritizes blocked tasks and surfaces reasons", () => {
 });
 
 test("done candidates stay visually distinct from done", () => {
-  const boot = bootstrap("Ship CG2 widget");
+  const boot = bootstrap("Ship task widget");
   const created = applyAction(
     boot.state,
     { action: "create_task", title: "Summarize result", kind: "followup" },
@@ -187,7 +187,7 @@ test("done candidates stay visually distinct from done", () => {
 });
 
 test("recent done tasks show after open tasks", () => {
-  const boot = bootstrap("Ship CG2 widget");
+  const boot = bootstrap("Ship task widget");
   const createdOpen = applyAction(
     boot.state,
     { action: "create_task", title: "Implement todo widget", kind: "followup" },
@@ -240,8 +240,37 @@ test("recent done tasks show after open tasks", () => {
   assert.ok(openIndex < doneIndex);
 });
 
+test("todo widget shows up to six visible tasks before collapsing the rest", () => {
+  const boot = bootstrap("Ship task widget");
+  let state = boot.state;
+  let events = boot.events;
+
+  for (const [index, title] of [
+    "Implement todo widget",
+    "Audit callers",
+    "Update prompt",
+    "Write tests",
+    "Review diff",
+    "Polish docs",
+    "Smoke-check async flow",
+  ].entries()) {
+    const created = applyAction(
+      state,
+      { action: "create_task", title, kind: "followup" },
+      { priorEvents: events, nextId: boot.nextId, now: `2026-04-18T10:${String(index + 1).padStart(2, "0")}:00.000Z` },
+    );
+    state = created.nextState;
+    events = created.nextEvents;
+  }
+
+  const snapshot = buildTodoWidgetSnapshot(state);
+  assert(snapshot);
+  assert.equal(snapshot.tasks.length, 6);
+  assert.equal(snapshot.hiddenTaskCount, 1);
+});
+
 test("todo widget output is stable across advisory compaction events", () => {
-  const boot = bootstrap("Ship CG2 widget");
+  const boot = bootstrap("Ship task widget");
   const created = applyAction(
     boot.state,
     { action: "create_task", title: "Implement todo widget", kind: "followup" },
@@ -258,11 +287,11 @@ test("todo widget output is stable across advisory compaction events", () => {
       payload: {
         advisory: {
           version: 2,
-          latestUserIntent: "Ship CG2 widget",
+          latestUserIntent: "Ship task widget",
           recentFocus: ["Investigated widget rendering"],
           suggestedNextAction: "Wire the widget into session lifecycle hooks",
           blockers: [],
-          relevantFiles: ["extensions/context-guardian-v2/index.ts"],
+          relevantFiles: ["extensions/task-tracker/index.ts"],
           artifacts: [],
           avoidRepeating: [],
           unresolvedQuestions: [],

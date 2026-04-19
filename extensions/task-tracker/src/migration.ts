@@ -2,7 +2,7 @@ import type { KnownLedgerEvent, TaskItem, UserContract } from "./types.ts";
 import { ENTRY_TYPES } from "./types.ts";
 import { createDefaultExecutionState, makeEventMeta } from "./utils.ts";
 
-export type LegacyContextGuardianState = {
+export type LegacyTrackerState = {
   originalObjective?: string | null;
   objective?: string | null;
   successCriteria?: string[];
@@ -18,7 +18,7 @@ export type LegacyContextGuardianState = {
   assumptions?: string[];
 };
 
-export function migrateLegacyStateToEvents(input: LegacyContextGuardianState, now: string, nextId: (prefix: string) => string): KnownLedgerEvent[] {
+export function migrateLegacyStateToEvents(input: LegacyTrackerState, now: string, nextId: (prefix: string) => string): KnownLedgerEvent[] {
   const objective = input.objective?.trim() || input.originalObjective?.trim();
   if (!objective) return [];
 
@@ -84,7 +84,7 @@ export function migrateLegacyStateToEvents(input: LegacyContextGuardianState, no
     stage: openTasks.length > 0 ? ("investigating" as const) : ("planning" as const),
     activeTaskIds: openTasks.slice(0, 3).map((task) => task.id),
     nextAction: input.nextAction?.trim() || null,
-    lastMeaningfulProgress: "Migrated legacy context-guardian v1 state.",
+    lastMeaningfulProgress: "Migrated legacy tracker v1 state.",
   };
 
   return [

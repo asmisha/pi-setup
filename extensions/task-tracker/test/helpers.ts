@@ -12,7 +12,7 @@ export function createDeterministicIdFactory() {
   };
 }
 
-export function bootstrap(objective = "Ship CG2") {
+export function bootstrap(objective = "Ship task tracker") {
   const nextId = createDeterministicIdFactory();
   const now = "2026-04-18T10:00:00.000Z";
   const events = buildBootstrapEvents({ objective, now, nextId, sourceMessageId: "m1" });

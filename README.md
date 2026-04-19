@@ -32,10 +32,15 @@ Caps `bash` tool result text before it enters session context, so shell-heavy in
 
 See `extensions/bash-output-guard/README.md`.
 
-### `extensions/context-guardian/`
-Adds durable task-state snapshots, early compaction, structured custom compaction, and `/handoff` support so long sessions keep their objective and exact next action.
+### `extensions/task-tracker/`
+The current durable task-tracking rewrite. It owns the event-sourced `task_tracker`, the parent-owned Active Work Packet, and the task widget/debug commands. Durable tracker state stays parent-owned across compaction.
 
-See `extensions/context-guardian/README.md`.
+See `extensions/task-tracker/README.md`.
+
+### `extensions/compaction/`
+A small compaction-only extension. It replaces Pi's generic compaction prompt with a repo-local structured advisory prompt and triggers compaction after context usage crosses 65%.
+
+See `extensions/compaction/README.md`.
 
 ## Other notable files
 
@@ -62,9 +67,34 @@ Verified from Pi's package docs and the checked-in settings file:
   - `npm:pi-executor`
   - `npm:@robhowley/pi-structured-return`
 - the repo-local `extensions/` and `skills/` directories are wired through relative paths in `.pi/settings.json`
+- Pi auto-loads the repo `task-tracker` and `compaction` extensions from `extensions/`
 - project installs land under `.pi/npm/` and `.pi/git/`, which are intentionally gitignored
 
 This keeps the extension/package list in the repo so a new machine can pick it up without redoing the package install list by hand.
+
+## Local Pi wiring for task tracking and compaction
+
+This repo does **not** rely on a standalone Pi setting like `compaction.prompt = ...` because Pi exposes compaction customization through the `session_before_compact` extension hook instead.
+
+If you use this repo's checked-in `.pi/settings.json`, the wiring is already in place:
+
+1. Pi loads the repo `extensions/` directory.
+2. `extensions/task-tracker/index.ts` stays active for durable task state.
+3. `extensions/compaction/index.ts` stays active for the custom compaction prompt and the 65% threshold.
+
+If you want the same behavior in another local Pi setup, wire it one of these ways:
+
+- **Auto-discovery:** place `extensions/task-tracker/` and `extensions/compaction/` under `~/.pi/agent/extensions/`
+- **settings.json:** add the absolute paths to those directories under `"extensions"`
+- **quick test:** run Pi with `--extension /absolute/path/to/extensions/task-tracker/index.ts --extension /absolute/path/to/extensions/compaction/index.ts`
+
+After changing extension wiring, run `/reload` (or restart Pi).
+
+Reference material:
+- durable tracker wiring: `extensions/task-tracker/index.ts`
+- task-tracker prompt rendering: `extensions/task-tracker/src/prompt.ts`
+- compaction prompt/runtime override: `extensions/compaction/src/compaction.ts`
+- compaction hook wiring: `extensions/compaction/index.ts`
 
 ## Scope note
 

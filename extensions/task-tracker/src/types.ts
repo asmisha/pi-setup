@@ -134,20 +134,37 @@ export type AcceptanceRecord = {
 };
 
 export const ENTRY_TYPES = {
-  contractUpsert: "cg2-contract-upsert",
-  contractChangeProposed: "cg2-contract-change-proposed",
-  taskCreated: "cg2-task-created",
-  taskPatched: "cg2-task-patched",
-  evidenceAdded: "cg2-evidence-added",
-  taskStatusProposed: "cg2-task-status-proposed",
-  taskStatusCommitted: "cg2-task-status-committed",
-  askStatusCommitted: "cg2-ask-status-committed",
-  taskArchived: "cg2-task-archived",
-  executionUpdated: "cg2-execution-updated",
-  advisoryStored: "cg2-compaction-advisory",
-  acceptanceRecorded: "cg2-acceptance-recorded",
-  projectionSnapshot: "cg2-projection-snapshot",
+  contractUpsert: "task-tracker-contract-upsert",
+  contractChangeProposed: "task-tracker-contract-change-proposed",
+  taskCreated: "task-tracker-task-created",
+  taskPatched: "task-tracker-task-patched",
+  evidenceAdded: "task-tracker-evidence-added",
+  taskStatusProposed: "task-tracker-task-status-proposed",
+  taskStatusCommitted: "task-tracker-task-status-committed",
+  askStatusCommitted: "task-tracker-ask-status-committed",
+  taskArchived: "task-tracker-task-archived",
+  executionUpdated: "task-tracker-execution-updated",
+  advisoryStored: "task-tracker-compaction-advisory",
+  acceptanceRecorded: "task-tracker-acceptance-recorded",
+  stateCleared: "task-tracker-state-cleared",
+  projectionSnapshot: "task-tracker-projection-snapshot",
 } as const;
+
+export const LEGACY_ENTRY_TYPE_ALIASES: Record<string, LedgerEventType> = {
+  "cg2-contract-upsert": ENTRY_TYPES.contractUpsert,
+  "cg2-contract-change-proposed": ENTRY_TYPES.contractChangeProposed,
+  "cg2-task-created": ENTRY_TYPES.taskCreated,
+  "cg2-task-patched": ENTRY_TYPES.taskPatched,
+  "cg2-evidence-added": ENTRY_TYPES.evidenceAdded,
+  "cg2-task-status-proposed": ENTRY_TYPES.taskStatusProposed,
+  "cg2-task-status-committed": ENTRY_TYPES.taskStatusCommitted,
+  "cg2-ask-status-committed": ENTRY_TYPES.askStatusCommitted,
+  "cg2-task-archived": ENTRY_TYPES.taskArchived,
+  "cg2-execution-updated": ENTRY_TYPES.executionUpdated,
+  "cg2-compaction-advisory": ENTRY_TYPES.advisoryStored,
+  "cg2-acceptance-recorded": ENTRY_TYPES.acceptanceRecorded,
+  "cg2-projection-snapshot": ENTRY_TYPES.projectionSnapshot,
+};
 
 export type LedgerEventType = (typeof ENTRY_TYPES)[keyof typeof ENTRY_TYPES];
 
@@ -217,6 +234,10 @@ export type AcceptanceRecordedPayload = {
   acceptance: AcceptanceRecord;
 };
 
+export type StateClearedPayload = {
+  reason?: string;
+};
+
 export type ProjectionSnapshotPayload = {
   state: ProjectedStateSnapshot;
 };
@@ -234,6 +255,7 @@ export type LedgerPayloadMap = {
   [ENTRY_TYPES.executionUpdated]: ExecutionUpdatedPayload;
   [ENTRY_TYPES.advisoryStored]: AdvisoryStoredPayload;
   [ENTRY_TYPES.acceptanceRecorded]: AcceptanceRecordedPayload;
+  [ENTRY_TYPES.stateCleared]: StateClearedPayload;
   [ENTRY_TYPES.projectionSnapshot]: ProjectionSnapshotPayload;
 };
 

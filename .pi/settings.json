@@ -7,8 +7,7 @@
     "npm:@robhowley/pi-structured-return"
   ],
   "extensions": [
-    "../extensions",
-    "-../extensions/context-guardian/index.ts"
+    "../extensions"
   ],
   "skills": [
     "../skills"

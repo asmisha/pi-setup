@@ -192,7 +192,34 @@ test("execution.waitingFor=user is normalized away without open asks or awaiting
   ]);
 
   assert.equal(state.execution.waitingFor, "nothing");
-  assert.ok(state.warnings.some((warning) => warning.includes("waitingFor=user")));
+  assert.ok(state.warnings.some((warning) => warning.includes("normalized to nothing")));
+});
+
+test("stateCleared resets earlier tracker state and lets later events rebuild from scratch", () => {
+  const { events } = bootstrap("Clear stale tracker state");
+  const state = projectLedger([
+    ...events,
+    {
+      type: ENTRY_TYPES.stateCleared,
+      ...makeEventMeta("manual", "authoritative", "2026-04-18T11:05:00.000Z"),
+      payload: { reason: "start over" },
+    },
+    {
+      type: ENTRY_TYPES.executionUpdated,
+      ...makeEventMeta("manual", "authoritative", "2026-04-18T11:06:00.000Z"),
+      payload: {
+        patch: {
+          stage: "planning",
+          nextAction: "Wait for a fresh objective",
+        },
+      },
+    },
+  ]);
+
+  assert.equal(state.contract, null);
+  assert.deepEqual(state.openAskIds, []);
+  assert.deepEqual(state.openTaskIds, []);
+  assert.equal(state.execution.nextAction, "Wait for a fresh objective");
 });
 
 test("advisory cannot silently close an open task", () => {
@@ -220,4 +247,84 @@ test("advisory cannot silently close an open task", () => {
   const nextState = projectLedger([...events, advisoryEvent]);
   assert.equal(nextState.tasks[rootTaskId]?.status, "in_progress");
   assert.match(explainWhyTaskOpen(nextState, rootTaskId), /status=in_progress/);
+});
+
+test("projector infers waiting on user after the last runnable parallel lane closes", () => {
+  const { state, events, nextId } = bootstrap("Parallel closeout");
+  const createdOne = applyTaskTrackerAction(
+    state,
+    { action: "create_task", title: "Read the spec", kind: "verification" },
+    createContext(nextId),
+  );
+  const stateOne = projectLedger([...events, ...createdOne.events]);
+  const firstTaskId = Object.keys(stateOne.tasks).find((taskId) => !state.tasks[taskId]);
+  assert.ok(firstTaskId);
+
+  const createdTwo = applyTaskTrackerAction(
+    stateOne,
+    { action: "create_task", title: "Audit callers", kind: "verification" },
+    createContext(nextId, { now: "2026-04-18T10:06:00.000Z" }),
+  );
+  const stateTwo = projectLedger([...events, ...createdOne.events, ...createdTwo.events]);
+  const secondTaskId = Object.keys(stateTwo.tasks).find((taskId) => !stateOne.tasks[taskId]);
+  assert.ok(secondTaskId);
+
+  const firstStarted = applyTaskTrackerAction(
+    stateTwo,
+    { action: "start_task", taskId: firstTaskId! },
+    createContext(nextId, { now: "2026-04-18T10:07:00.000Z" }),
+  );
+  const firstStartedState = projectLedger([...events, ...createdOne.events, ...createdTwo.events, ...firstStarted.events]);
+  const secondStarted = applyTaskTrackerAction(
+    firstStartedState,
+    { action: "start_task", taskId: secondTaskId! },
+    createContext(nextId, { now: "2026-04-18T10:08:00.000Z" }),
+  );
+  const secondStartedState = projectLedger([...events, ...createdOne.events, ...createdTwo.events, ...firstStarted.events, ...secondStarted.events]);
+
+  const waiting = applyTaskTrackerAction(
+    secondStartedState,
+    { action: "await_user", taskId: firstTaskId!, reason: "Need product choice" },
+    createContext(nextId, { now: "2026-04-18T10:09:00.000Z" }),
+  );
+  const waitingState = projectLedger([...events, ...createdOne.events, ...createdTwo.events, ...firstStarted.events, ...secondStarted.events, ...waiting.events]);
+
+  const proposed = applyTaskTrackerAction(
+    waitingState,
+    { action: "propose_done", taskId: secondTaskId! },
+    createContext(nextId, { now: "2026-04-18T10:10:00.000Z" }),
+  );
+  const candidateState = projectLedger([...events, ...createdOne.events, ...createdTwo.events, ...firstStarted.events, ...secondStarted.events, ...waiting.events, ...proposed.events]);
+  const evidence = applyTaskTrackerAction(
+    candidateState,
+    {
+      action: "add_evidence",
+      taskId: secondTaskId!,
+      evidence: { kind: "test", ref: "npm test", summary: "All tests passed", level: "verified" },
+    },
+    createContext(nextId, { now: "2026-04-18T10:11:00.000Z" }),
+  );
+  const evidenceState = projectLedger([...events, ...createdOne.events, ...createdTwo.events, ...firstStarted.events, ...secondStarted.events, ...waiting.events, ...proposed.events, ...evidence.events]);
+  const committed = applyTaskTrackerAction(
+    evidenceState,
+    { action: "commit_done", taskId: secondTaskId!, reason: "verified_evidence" },
+    createContext(nextId, { now: "2026-04-18T10:12:00.000Z" }),
+  );
+
+  const finalState = projectLedger([
+    ...events,
+    ...createdOne.events,
+    ...createdTwo.events,
+    ...firstStarted.events,
+    ...secondStarted.events,
+    ...waiting.events,
+    ...proposed.events,
+    ...evidence.events,
+    ...committed.events,
+  ]);
+
+  assert.deepEqual(finalState.execution.activeTaskIds, []);
+  assert.equal(finalState.execution.waitingFor, "user");
+  assert.equal(finalState.execution.blocker, "Need product choice");
+  assert.equal(finalState.execution.stage, "awaiting_user");
 });

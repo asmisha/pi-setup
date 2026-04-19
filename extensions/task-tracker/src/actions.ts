@@ -88,6 +88,113 @@ function dedupeTaskTitle(state: ProjectedState, title: string): TaskItem | null 
   return Object.values(state.tasks).find((task) => !task.archivedAt && (task.status === "done_candidate" || task.status === "todo" || task.status === "in_progress" || task.status === "blocked" || task.status === "awaiting_user") && normalizeForMatch(task.title) === signature) ?? null;
 }
 
+type TaskStatusOverrides = Record<string, TaskItem["status"]>;
+
+function isRootObjectiveTask(state: ProjectedState, taskId: string): boolean {
+  const task = state.tasks[taskId];
+  const objective = state.contract?.activeObjective?.trim();
+  if (!task || !objective) return false;
+  return !task.parentId && task.kind === "user_requested" && task.source === "user" && task.title.trim() === objective;
+}
+
+function effectiveStatus(task: TaskItem, overrides: TaskStatusOverrides): TaskItem["status"] {
+  return overrides[task.id] ?? task.status;
+}
+
+function isActiveTaskStatus(status: TaskItem["status"]): boolean {
+  return status === "todo" || status === "in_progress" || status === "done_candidate";
+}
+
+function isRunnableTaskStatus(status: TaskItem["status"]): boolean {
+  return status === "todo" || status === "in_progress";
+}
+
+function shouldIgnoreRootObjectiveLane(state: ProjectedState, overrides: TaskStatusOverrides = {}): boolean {
+  return Object.values(state.tasks).some((task) => {
+    if (task.archivedAt || isRootObjectiveTask(state, task.id)) return false;
+    const status = effectiveStatus(task, overrides);
+    return status !== "done" && status !== "dropped";
+  });
+}
+
+function normalizeActiveTaskIds(state: ProjectedState, taskIds: string[], overrides: TaskStatusOverrides = {}): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const taskId of taskIds) {
+    if (seen.has(taskId)) continue;
+    seen.add(taskId);
+
+    const task = state.tasks[taskId];
+    if (!task || task.archivedAt) continue;
+    if (!isActiveTaskStatus(effectiveStatus(task, overrides))) continue;
+    normalized.push(task.id);
+  }
+
+  const ignoreRootObjective = shouldIgnoreRootObjectiveLane(state, overrides);
+  return ignoreRootObjective ? normalized.filter((taskId) => !isRootObjectiveTask(state, taskId)) : normalized;
+}
+
+function hasTaskWithStatus(state: ProjectedState, overrides: TaskStatusOverrides, status: TaskItem["status"]): boolean {
+  return Object.values(state.tasks).some((task) => !task.archivedAt && effectiveStatus(task, overrides) === status);
+}
+
+function latestReasonForStatus(state: ProjectedState, overrides: TaskStatusOverrides, status: Extract<TaskItem["status"], "blocked" | "awaiting_user">): string | null {
+  const matchingTask = Object.values(state.tasks)
+    .filter((task) => !task.archivedAt && effectiveStatus(task, overrides) === status)
+    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))[0];
+
+  if (!matchingTask) return null;
+  if (status === "blocked") {
+    return matchingTask.blockingReason?.replace(/^blocked:\s*/i, "").trim() || "Blocked without reason.";
+  }
+  return matchingTask.waitingReason?.replace(/^awaiting user:\s*/i, "").trim() || "Awaiting user input.";
+}
+
+function buildExecutionPatch(
+  state: ProjectedState,
+  input: {
+    activeTaskIds: string[];
+    lastMeaningfulProgress: string;
+    nextAction?: string | null;
+    statusOverrides?: TaskStatusOverrides;
+    preferredWaitingReason?: string | null;
+  },
+) {
+  const statusOverrides = input.statusOverrides ?? {};
+  const ignoreRootObjective = shouldIgnoreRootObjectiveLane(state, statusOverrides);
+  const activeTaskIds = normalizeActiveTaskIds(state, input.activeTaskIds, statusOverrides);
+  const hasRunnableWork = Object.values(state.tasks).some((task) => {
+    if (task.archivedAt) return false;
+    if (ignoreRootObjective && isRootObjectiveTask(state, task.id)) return false;
+    return isRunnableTaskStatus(effectiveStatus(task, statusOverrides));
+  });
+
+  let waitingFor: ProjectedState["execution"]["waitingFor"] = "nothing";
+  let blocker: string | null = null;
+  let stage: ProjectedState["execution"]["stage"] = "investigating";
+
+  if (activeTaskIds.length === 0 && !hasRunnableWork) {
+    if (hasTaskWithStatus(state, statusOverrides, "awaiting_user")) {
+      waitingFor = "user";
+      blocker = input.preferredWaitingReason ?? latestReasonForStatus(state, statusOverrides, "awaiting_user");
+      stage = "awaiting_user";
+    } else if (hasTaskWithStatus(state, statusOverrides, "blocked")) {
+      waitingFor = "external";
+      blocker = input.preferredWaitingReason ?? latestReasonForStatus(state, statusOverrides, "blocked");
+    }
+  }
+
+  return {
+    stage,
+    activeTaskIds,
+    nextAction: input.nextAction ?? state.execution.nextAction,
+    waitingFor,
+    blocker,
+    lastMeaningfulProgress: input.lastMeaningfulProgress,
+  };
+}
+
 export function applyTaskTrackerAction(state: ProjectedState, input: TaskTrackerAction, context: TrackerActionContext): TrackerActionResult {
   switch (input.action) {
     case "list_open": {
@@ -172,13 +279,11 @@ export function applyTaskTrackerAction(state: ProjectedState, input: TaskTracker
           type: ENTRY_TYPES.executionUpdated,
           ...makeEventMeta(context.actor, "authoritative", context.now),
           payload: {
-            patch: {
-              stage: "investigating",
-              activeTaskIds: [task.id],
-              waitingFor: "nothing",
-              blocker: null,
+            patch: buildExecutionPatch(state, {
+              activeTaskIds: [...state.execution.activeTaskIds, task.id],
+              statusOverrides: { [task.id]: "in_progress" },
               lastMeaningfulProgress: `Started task ${task.id}.`,
-            },
+            }),
           },
         }),
       ];
@@ -201,13 +306,12 @@ export function applyTaskTrackerAction(state: ProjectedState, input: TaskTracker
           type: ENTRY_TYPES.executionUpdated,
           ...makeEventMeta(context.actor, "authoritative", context.now),
           payload: {
-            patch: {
-              stage: "investigating",
-              activeTaskIds: [task.id],
-              waitingFor: "external",
-              blocker: input.reason,
+            patch: buildExecutionPatch(state, {
+              activeTaskIds: state.execution.activeTaskIds.filter((taskId) => taskId !== task.id),
+              statusOverrides: { [task.id]: "blocked" },
+              preferredWaitingReason: input.reason,
               lastMeaningfulProgress: `Blocked task ${task.id}.`,
-            },
+            }),
           },
         }),
       ];
@@ -230,13 +334,12 @@ export function applyTaskTrackerAction(state: ProjectedState, input: TaskTracker
           type: ENTRY_TYPES.executionUpdated,
           ...makeEventMeta(context.actor, "authoritative", context.now),
           payload: {
-            patch: {
-              stage: "awaiting_user",
-              activeTaskIds: [task.id],
-              waitingFor: "user",
-              blocker: input.reason,
+            patch: buildExecutionPatch(state, {
+              activeTaskIds: state.execution.activeTaskIds.filter((taskId) => taskId !== task.id),
+              statusOverrides: { [task.id]: "awaiting_user" },
+              preferredWaitingReason: input.reason,
               lastMeaningfulProgress: `Waiting for user on task ${task.id}.`,
-            },
+            }),
           },
         }),
       ];
@@ -415,17 +518,22 @@ export function applyTaskTrackerAction(state: ProjectedState, input: TaskTracker
       };
     }
     case "set_next_action": {
+      const patch = input.activeTaskIds
+        ? buildExecutionPatch(state, {
+            activeTaskIds: input.activeTaskIds,
+            nextAction: input.nextAction,
+            lastMeaningfulProgress: `Set next action: ${input.nextAction}`,
+          })
+        : {
+            nextAction: input.nextAction,
+            lastMeaningfulProgress: `Set next action: ${input.nextAction}`,
+          };
+
       const events = [
         makeEvent({
           type: ENTRY_TYPES.executionUpdated,
           ...makeEventMeta(context.actor, "authoritative", context.now),
-          payload: {
-            patch: {
-              nextAction: input.nextAction,
-              ...(input.activeTaskIds ? { activeTaskIds: input.activeTaskIds } : {}),
-              lastMeaningfulProgress: `Set next action: ${input.nextAction}`,
-            },
-          },
+          payload: { patch },
         }),
       ];
       return {

@@ -3,12 +3,15 @@ import { explainWhyTaskDone, explainWhyTaskOpen, latestContractProposals, summar
 
 export function renderProjectedState(state: ProjectedState): string {
   const contract = state.contract;
+  const proposals = latestContractProposals(state);
   return [
-    `Contract: ${contract ? contract.activeObjective : "none"}`,
+    `Original objective: ${contract?.originalObjective ?? "none"}`,
+    `Active objective: ${contract?.activeObjective ?? "none"}`,
     `Open asks: ${state.openAskIds.join(", ") || "none"}`,
     `Open tasks: ${state.openTaskIds.join(", ") || "none"}`,
     `Done candidates: ${state.doneCandidateIds.join(", ") || "none"}`,
     `Archived tasks: ${state.archivedTaskIds.join(", ") || "none"}`,
+    `Contract proposals: ${proposals.length > 0 ? proposals.map((item) => `${item.id}[${item.status}]`).join(", ") : "none"}`,
     `Execution stage: ${state.execution.stage}`,
     `Next action: ${state.execution.nextAction ?? "none"}`,
     `Waiting for: ${state.execution.waitingFor}`,
@@ -18,14 +21,6 @@ export function renderProjectedState(state: ProjectedState): string {
 
 export function renderRecentLedgerEventsText(events: Parameters<typeof summarizeLedger>[0], limit = 12): string {
   return summarizeLedger(events, limit);
-}
-
-export function renderContractProposals(state: ProjectedState): string {
-  const proposals = latestContractProposals(state);
-  if (proposals.length === 0) return "No contract change proposals.";
-  return proposals
-    .map((proposal) => `- [${proposal.id}][${proposal.status}] ${proposal.kind}: ${Array.isArray(proposal.proposedValue) ? proposal.proposedValue.join(" | ") : proposal.proposedValue}`)
-    .join("\n");
 }
 
 export function explainTaskOpen(state: ProjectedState, taskId: string): string {

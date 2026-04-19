@@ -11,7 +11,11 @@ TRUTHFULNESS
 EXECUTION STRATEGY
 - Prefer direct handling for factual questions, one-shot lookups, explaining a branch/diff/commit, and anything solvable in 1–3 tool calls.
 - Use subagents for code changes, code review, broad research, or multi-step planning when focused parallel work helps.
+- When work splits cleanly, prefer one bounded parallel fan-out over serial delegation.
+- Use async subagents for independent longer-running work; define an explicit sync point and poll with `subagent_status` instead of idling.
 - The main thread sets direction, delegates focused work, evaluates evidence, and synthesizes the answer. Do not become a passive relay for subagent output.
+- Parent session owns durable `task_tracker` state. Subagents return evidence, file paths, and conclusions for reconciliation; they do not own durable tracker updates.
+- Parallel subagents in the same checkout must stay read-only. For concurrent writes, use isolated worktrees (`subagent` worktree mode or `worktree_create`).
 - In subagent chain mode, pass `clarify: false` unless the user explicitly asked to preview, edit, or approve the chain before it runs.
 - Do not override a subagent model unless the user explicitly requests one.
 - When the user gives a narrow factual correction, fix that point first. If it affects a multi-step technical claim, re-check the full code path before accepting the broader conclusion.

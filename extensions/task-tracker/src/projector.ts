@@ -86,6 +86,29 @@ function canTransition(currentStatus: TaskStatus, nextStatus: TaskStatus): boole
   return ALLOWED_STATUS_TRANSITIONS[currentStatus].includes(nextStatus);
 }
 
+function isRootObjectiveTask(state: ProjectedState, task: TaskItem): boolean {
+  const objective = state.contract?.activeObjective?.trim();
+  if (!objective) return false;
+  return !task.archivedAt && !task.parentId && task.kind === "user_requested" && task.source === "user" && task.title.trim() === objective;
+}
+
+function shouldIgnoreRootObjectiveLane(state: ProjectedState, tasks: TaskItem[]): boolean {
+  return tasks.some((task) => !task.archivedAt && !isRootObjectiveTask(state, task) && task.status !== "done" && task.status !== "dropped");
+}
+
+function isActiveExecutionStatus(status: TaskStatus): boolean {
+  return status === "todo" || status === "in_progress" || status === "done_candidate";
+}
+
+function latestTaskReason(tasks: TaskItem[], status: Extract<TaskStatus, "blocked" | "awaiting_user">): string | null {
+  const latestTask = sortTasksByUpdatedAtDesc(tasks.filter((task) => !task.archivedAt && task.status === status))[0];
+  if (!latestTask) return null;
+  if (status === "blocked") {
+    return latestTask.blockingReason?.replace(/^blocked:\s*/i, "").trim() || "Blocked without reason.";
+  }
+  return latestTask.waitingReason?.replace(/^awaiting user:\s*/i, "").trim() || "Awaiting user input.";
+}
+
 export function canCommitTaskDone(state: ProjectedState, taskId: string, reason: DoneReason, evidenceIds?: string[]): { ok: true } | { ok: false; reason: string } {
   const task = state.tasks[taskId];
   if (!task) return { ok: false, reason: `Task ${taskId} does not exist.` };
@@ -245,17 +268,51 @@ function recomputeDerivedState(state: ProjectedState): ProjectedState {
     }
   }
 
-  const allowedActive = new Set(tasks.filter((task) => !task.archivedAt && (isOpenTaskStatus(task.status) || task.status === "done_candidate")).map((task) => task.id));
+  const ignoreRootObjective = shouldIgnoreRootObjectiveLane(state, tasks);
+  const allowedActive = new Set(tasks
+    .filter((task) => !task.archivedAt && (!ignoreRootObjective || !isRootObjectiveTask(state, task)) && isActiveExecutionStatus(task.status))
+    .map((task) => task.id));
   const nextActive = state.execution.activeTaskIds.filter((taskId) => allowedActive.has(taskId));
   if (nextActive.length !== state.execution.activeTaskIds.length) {
-    pushWarning(state, "execution.activeTaskIds referenced missing or archived tasks and were pruned.");
+    pushWarning(state, "execution.activeTaskIds referenced missing, archived, or non-active tasks and were pruned.");
     state.execution.activeTaskIds = nextActive;
   }
 
+  const hasRunnableTask = tasks.some((task) => !task.archivedAt && (!ignoreRootObjective || !isRootObjectiveTask(state, task)) && (task.status === "todo" || task.status === "in_progress"));
   const hasAwaitingUserTask = tasks.some((task) => !task.archivedAt && task.status === "awaiting_user");
-  if (state.execution.waitingFor === "user" && state.openAskIds.length === 0 && !hasAwaitingUserTask) {
-    pushWarning(state, "execution.waitingFor=user without open asks or awaiting_user tasks; normalizing to nothing.");
+  const hasBlockedTask = tasks.some((task) => !task.archivedAt && task.status === "blocked");
+
+  if (state.execution.activeTaskIds.length > 0 || hasRunnableTask) {
+    if (state.execution.waitingFor !== "nothing" || state.execution.blocker) {
+      pushWarning(state, "execution.waitingFor/blocker was normalized because runnable work still exists.");
+      state.execution.waitingFor = "nothing";
+      state.execution.blocker = null;
+    }
+    if (state.execution.stage === "awaiting_user") {
+      pushWarning(state, "execution.stage=awaiting_user was normalized because runnable work still exists.");
+      state.execution.stage = "investigating";
+    }
+  } else if (hasAwaitingUserTask) {
+    if (state.execution.waitingFor !== "user") {
+      pushWarning(state, "execution.waitingFor was normalized to user because only awaiting_user work remains.");
+    }
+    state.execution.waitingFor = "user";
+    state.execution.blocker = latestTaskReason(tasks, "awaiting_user");
+    state.execution.stage = "awaiting_user";
+  } else if (hasBlockedTask) {
+    if (state.execution.waitingFor !== "external") {
+      pushWarning(state, "execution.waitingFor was normalized to external because only blocked work remains.");
+    }
+    state.execution.waitingFor = "external";
+    state.execution.blocker = latestTaskReason(tasks, "blocked");
+    if (state.execution.stage === "awaiting_user") {
+      pushWarning(state, "execution.stage=awaiting_user was normalized because only blocked work remains.");
+      state.execution.stage = "investigating";
+    }
+  } else if (state.execution.waitingFor !== "nothing" || state.execution.blocker) {
+    pushWarning(state, "execution.waitingFor/blocker was normalized to nothing because no waiting work remains.");
     state.execution.waitingFor = "nothing";
+    state.execution.blocker = null;
   }
 
   const acceptedProposals = state.contractChangeProposals.filter((proposal) => proposal.status === "accepted");
@@ -393,6 +450,10 @@ export function projectLedger(events: KnownLedgerEvent[], now = new Date(0).toIS
         if (!state.acceptances.some((item) => item.id === acceptance.id)) {
           state.acceptances.push(acceptance);
         }
+        break;
+      }
+      case ENTRY_TYPES.stateCleared: {
+        Object.assign(state, createEmptyProjectedState(event.createdAt));
         break;
       }
       case ENTRY_TYPES.projectionSnapshot: {

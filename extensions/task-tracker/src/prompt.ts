@@ -6,7 +6,6 @@ export type PromptBudget = {
   maxOpenTasks: number;
   maxDoneCandidates: number;
   maxRecentDone: number;
-  maxAdvisoryBullets: number;
 };
 
 export const DEFAULT_PROMPT_BUDGET: PromptBudget = {
@@ -14,7 +13,6 @@ export const DEFAULT_PROMPT_BUDGET: PromptBudget = {
   maxOpenTasks: 12,
   maxDoneCandidates: 6,
   maxRecentDone: 6,
-  maxAdvisoryBullets: 5,
 };
 
 function sortOpenTasks(tasks: TaskItem[]): TaskItem[] {
@@ -39,6 +37,12 @@ function renderAsk(ask: ContractAsk): string {
   return `- [${ask.id}] ${ask.text}`;
 }
 
+function isRootObjectiveTask(state: ProjectedState, task: TaskItem): boolean {
+  const objective = state.contract?.activeObjective?.trim();
+  if (!objective) return false;
+  return !task.archivedAt && !task.parentId && task.kind === "user_requested" && task.source === "user" && task.title.trim() === objective;
+}
+
 function renderTask(task: TaskItem): string {
   const suffix = task.relevantFiles.length > 0 ? ` — files: ${task.relevantFiles.join(", ")}` : "";
   return `- [${task.id}][${task.status}][${task.kind}] ${task.title}${suffix}`;
@@ -57,18 +61,24 @@ export function selectPromptPacket(state: ProjectedState, budget: Partial<Prompt
   const openTasks = sortOpenTasks(latestOpenTasks(state));
   const doneCandidates = latestDoneCandidates(state);
   const recentDone = latestRecentDone(state);
+  const visibleOpenTasks = openTasks.filter((task) => !isRootObjectiveTask(state, task));
+  const visibleDoneCandidates = doneCandidates.filter((task) => !isRootObjectiveTask(state, task));
+  const visibleRecentDone = recentDone.filter((task) => !isRootObjectiveTask(state, task));
+  const promptOpenTasks = visibleOpenTasks.length > 0 ? visibleOpenTasks : openTasks;
+  const promptDoneCandidates = visibleDoneCandidates.length > 0 ? visibleDoneCandidates : doneCandidates;
+  const promptRecentDone = visibleRecentDone.length > 0 ? visibleRecentDone : recentDone;
 
   return {
     budget: resolvedBudget,
     openAsks: openAsks.slice(0, resolvedBudget.maxOpenAsks),
-    openTasks: openTasks.slice(0, resolvedBudget.maxOpenTasks),
-    doneCandidates: doneCandidates.slice(0, resolvedBudget.maxDoneCandidates),
-    recentDone: recentDone.slice(0, resolvedBudget.maxRecentDone),
+    openTasks: promptOpenTasks.slice(0, resolvedBudget.maxOpenTasks),
+    doneCandidates: promptDoneCandidates.slice(0, resolvedBudget.maxDoneCandidates),
+    recentDone: promptRecentDone.slice(0, resolvedBudget.maxRecentDone),
     overflow: {
       openAsks: Math.max(0, openAsks.length - resolvedBudget.maxOpenAsks),
-      openTasks: Math.max(0, openTasks.length - resolvedBudget.maxOpenTasks),
-      doneCandidates: Math.max(0, doneCandidates.length - resolvedBudget.maxDoneCandidates),
-      recentDone: Math.max(0, recentDone.length - resolvedBudget.maxRecentDone),
+      openTasks: Math.max(0, promptOpenTasks.length - resolvedBudget.maxOpenTasks),
+      doneCandidates: Math.max(0, promptDoneCandidates.length - resolvedBudget.maxDoneCandidates),
+      recentDone: Math.max(0, promptRecentDone.length - resolvedBudget.maxRecentDone),
     },
   };
 }
@@ -76,7 +86,6 @@ export function selectPromptPacket(state: ProjectedState, budget: Partial<Prompt
 export function renderActiveWorkPacket(state: ProjectedState, budget: Partial<PromptBudget> = {}): string {
   const packet = selectPromptPacket(state, budget);
   const contract = state.contract;
-  const advisory = state.advisory;
 
   const contractLines = contract
     ? [
@@ -86,15 +95,6 @@ export function renderActiveWorkPacket(state: ProjectedState, budget: Partial<Pr
         `Constraints: ${contract.constraints.length > 0 ? contract.constraints.join(" | ") : "none"}`,
       ]
     : ["No contract recorded."];
-
-  const advisoryLines = advisory
-    ? {
-        recentFocus: advisory.recentFocus.slice(0, packet.budget.maxAdvisoryBullets).map((item) => `- ${item}`),
-        blockers: advisory.blockers.slice(0, packet.budget.maxAdvisoryBullets).map((item) => `- ${item}`),
-        relevantFiles: advisory.relevantFiles.slice(0, packet.budget.maxAdvisoryBullets).map((item) => `- ${item}`),
-        avoidRepeating: advisory.avoidRepeating.slice(0, packet.budget.maxAdvisoryBullets).map((item) => `- ${item}`),
-      }
-    : null;
 
   return [
     "## Immutable User Contract",
@@ -115,21 +115,16 @@ export function renderActiveWorkPacket(state: ProjectedState, budget: Partial<Pr
     `Waiting for: ${state.execution.waitingFor}`,
     `Blocker: ${state.execution.blocker ?? "none"}`,
     "",
-    "## Recent Advisory Context",
-    `Latest user intent: ${advisory?.latestUserIntent ?? "none"}`,
-    `Suggested next action: ${advisory?.suggestedNextAction ?? "none"}`,
-    truncateSection("Recent focus", advisoryLines?.recentFocus ?? [], packet.budget.maxAdvisoryBullets),
-    truncateSection("Recent blockers", advisoryLines?.blockers ?? [], packet.budget.maxAdvisoryBullets),
-    truncateSection("Relevant files", advisoryLines?.relevantFiles ?? [], packet.budget.maxAdvisoryBullets),
-    truncateSection("Avoid repeating", advisoryLines?.avoidRepeating ?? [], packet.budget.maxAdvisoryBullets),
-    "",
     "Hard rules:",
-    "- Open tasks outrank compaction advisory.",
+    "- Open tasks outrank compaction summaries.",
     "- done_candidate != done.",
     "- Do not treat a question as closed without evidence or explicit acceptance.",
     "- If a done-gated task fully answers an open ask, satisfy that ask in task_tracker.",
     "- Advisory cannot rewrite the contract or silently close work.",
     "- If the only tracked task is the root objective, use task_tracker to create explicit subtasks before substantial work.",
+    "- Keep execution.activeTaskIds honest: parallel sibling lanes are allowed when the work really splits.",
+    "- Parent session owns durable task_tracker state; subagents return evidence/results for reconciliation.",
+    "- Same-checkout parallel subagents must stay read-only; use isolated worktrees for concurrent writes.",
     "- After meaningful state changes, update task_tracker instead of only narrating progress in prose.",
   ].join("\n");
 }

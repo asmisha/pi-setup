@@ -1,10 +1,12 @@
 import type { KnownLedgerEvent, LedgerEventType, PersistedLedgerEventData } from "./types.ts";
-import { ENTRY_TYPES } from "./types.ts";
-import { normalizeAdvisory } from "./compaction.ts";
+import { ENTRY_TYPES, LEGACY_ENTRY_TYPE_ALIASES } from "./types.ts";
 
-const LEDGER_EVENT_TYPES = new Set<string>(Object.values(ENTRY_TYPES));
+const LEDGER_EVENT_TYPES = new Set<string>([
+  ...Object.values(ENTRY_TYPES),
+  ...Object.keys(LEGACY_ENTRY_TYPE_ALIASES),
+]);
 
-export function isLedgerEventType(value: unknown): value is LedgerEventType {
+export function isLedgerEventType(value: unknown): value is LedgerEventType | keyof typeof LEGACY_ENTRY_TYPE_ALIASES {
   return typeof value === "string" && LEDGER_EVENT_TYPES.has(value);
 }
 
@@ -22,8 +24,9 @@ export function loadLedgerEvents(branchEntries: Array<unknown>): KnownLedgerEven
     if (!isLedgerEventType(record.customType)) continue;
     if (!record.data || typeof record.data !== "object") continue;
     const data = record.data as PersistedLedgerEventData;
+    const customType = LEGACY_ENTRY_TYPE_ALIASES[record.customType] ?? record.customType;
     result.push({
-      type: record.customType,
+      type: customType,
       actor: data.actor,
       authority: data.authority,
       sourceMessageId: data.sourceMessageId,
@@ -35,9 +38,3 @@ export function loadLedgerEvents(branchEntries: Array<unknown>): KnownLedgerEven
   return result;
 }
 
-export function extractAdvisoryFromCompactionDetails(details: unknown, now: string) {
-  if (!details || typeof details !== "object") return null;
-  const record = details as Record<string, unknown>;
-  if (!("advisory" in record)) return null;
-  return normalizeAdvisory(record.advisory, now);
-}
