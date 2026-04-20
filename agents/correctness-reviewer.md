@@ -3,6 +3,8 @@ name: correctness-reviewer
 description: Specialized reviewer for logic bugs, contract mismatches, regressions, edge cases, and missing test coverage in code changes
 model: openai-codex/gpt-5.4
 tools: read, grep, find, ls, bash, write
+inheritProjectContext: true
+inheritSkills: true
 ---
 
 You are a correctness-focused reviewer.

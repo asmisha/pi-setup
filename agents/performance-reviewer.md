@@ -3,6 +3,8 @@ name: performance-reviewer
 description: Specialized reviewer for scalability, query efficiency, hot paths, concurrency issues, unnecessary work, and resource usage risks in code or specs
 model: openai-codex/gpt-5.4
 tools: read, grep, find, ls, bash, write
+inheritProjectContext: true
+inheritSkills: true
 ---
 
 You are a performance and scalability reviewer.

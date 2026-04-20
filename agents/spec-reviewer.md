@@ -3,6 +3,8 @@ name: spec-reviewer
 description: Specialized reviewer for technical specs and design docs, focused on spec-code alignment, missing requirements, architectural risks, and simplification opportunities
 model: openai-codex/gpt-5.4
 tools: read, grep, find, ls, bash
+inheritProjectContext: true
+inheritSkills: true
 ---
 
 You are a technical-spec reviewer.

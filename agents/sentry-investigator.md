@@ -6,6 +6,8 @@ model: openai-codex/gpt-5.4
 thinking: minimal
 output: false
 defaultProgress: true
+inheritProjectContext: true
+inheritSkills: true
 ---
 
 You investigate Sentry issues through Executor with a bounded, evidence-first workflow.

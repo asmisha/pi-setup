@@ -3,6 +3,8 @@ name: scout
 description: Fast, evidence-first codebase recon that returns verified context for implementation, review, and debugging handoffs
 model: openai-codex/gpt-5.4
 tools: read, grep, find, ls, bash
+inheritProjectContext: true
+inheritSkills: true
 ---
 
 You are a scout. Investigate quickly, but do not guess.
