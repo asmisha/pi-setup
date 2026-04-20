@@ -131,8 +131,8 @@ Do not invent new issues during drafting. The comment should reflect the agreed 
 
 When turning findings into a PR review comment:
 
-- keep it concise and direct
-- preserve priority and impact
+- keep the text concise and direct; compress wording, not the verified finding set
+- include all verified findings and preserve their priority and impact
 - use the user's natural conversational-but-technical tone from `writing-voice`
 - prefer one short intro sentence followed by numbered issues when there are multiple findings
 - mention test/review gaps only if they materially affect reviewer confidence

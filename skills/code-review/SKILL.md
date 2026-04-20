@@ -87,8 +87,8 @@ For each extra reviewer, explicitly say why it was chosen, what non-overlapping 
 
 - Merge findings from the core reviewers and any extra targeted reviewers you launched.
 - Deduplicate only true duplicates (same file, same line, same issue).
-- Preserve distinct issues even if there are many.
-- Order everything by priority.
+- Preserve all verified findings even if there are many.
+- Order them by priority: correctness, security, edge cases, error handling, performance, maintainability, then style.
 - Synthesis happens in the orchestrator.
 - If a reviewer returned a temp-file path for full findings, read that file and synthesize from it.
 - If a reviewer response is partial, missing detail, or truncated, recover the missing details from that reviewer’s first-pass artifact/path before doing any new analysis yourself.

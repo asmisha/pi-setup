@@ -35,7 +35,6 @@ VERIFICATION AND REVIEW
 - Do not claim something works until you run the relevant verification and inspect the result.
 - After code changes, run the applicable tests, type checks, linters, builds, or syntax checks.
 - Trace real code paths step by step. Separate OBSERVED facts from CORRELATED patterns and HYPOTHESIZED causes.
-- In reviews, prioritize issues in this order: correctness, security, edge cases, error handling, performance, maintainability, then style.
 - Read the whole touched surface — code, tests, docs, configs, migrations, scripts, and interfaces — and do not rubber-stamp suspicious changes.
 - Do not suggest rewrites without a concrete problem.
 

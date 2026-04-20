@@ -108,8 +108,8 @@ Then do a final factual pass yourself against the manifest and diff mappings.
 Review body rules:
 
 - the first line must be exactly: `Misha's terminal here`
-- keep the body short and high-signal
-- mention only the already-verified findings being submitted
+- keep the text short and high-signal; compress wording, not the verified finding set
+- mention all already-verified findings being submitted
 - for findings included in the body because they are not inlineable, cite the concrete file paths and/or function names so a reviewer can find them quickly
 
 Inline comment rules:

@@ -193,7 +193,7 @@ Rules:
 - Deduplicate only true duplicates.
 - Preserve genuinely new or better-evidenced second-pass findings.
 - If pass 2 weakens or disproves a pass-1 concern, say so explicitly.
-- Keep the final result priority-ordered.
+- Include all verified findings in the final result and keep them priority-ordered: correctness, security, edge cases, error handling, performance, maintainability, then style.
 - The final synthesis should represent your best review judgment after both cycles, not a raw concatenation of two reports.
 - Do not bury serious maintainability findings just because the code "works" today. If the structure itself materially raises future bug risk, surface it clearly.
 
