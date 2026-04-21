@@ -4,7 +4,8 @@
     "git:github.com/jo-inc/pi-mem",
     "https://github.com/SamuelLHuber/pi-fff",
     "npm:pi-executor",
-    "npm:@robhowley/pi-structured-return"
+    "npm:@robhowley/pi-structured-return",
+    "npm:pi-intercom"
   ],
   "extensions": [
     "../extensions"
