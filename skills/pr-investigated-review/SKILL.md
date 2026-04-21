@@ -5,11 +5,11 @@ description: Review a GitHub pull request in an isolated worktree, diff it again
 
 # PR Investigated Review
 
-Use this skill for pull request review workflows that should run in a dedicated worktree instead of the current main checkout, and where candidate issues should be verified before they reach the final synthesis across two sequential review passes.
+Use this skill for pull request review workflows that should stay out of the current main/default checkout, reusing the current non-main worktree when it already has the branch under review, and where candidate issues should be verified before they reach the final synthesis across two sequential review passes. Only create a separate review worktree when the review target is on a different branch or the current checkout is the main/default branch.
 
 ## Goals
 
-1. Make sure the review happens in a non-main worktree (existing or newly created), not the user's main checkout.
+1. Make sure the review happens outside the user's main/default checkout, reusing the current matching non-main worktree when possible and only creating one when isolation is actually needed.
 2. Review the PR against the merge base with the PR base branch.
 3. Run a first review pass where the four core specialist reviewers, plus any additional scope-driven targeted reviewers you judge necessary, review the PR broadly and verify candidate issues through focused issue-investigator subagents before returning confirmed findings.
 4. Create a grounded pass-1 handoff artifact and second-pass review brief, then run the same core reviewers again plus any pass-2-specific targeted reviewers, with the brief as guidance, not truth, while still requiring issue-investigator verification for candidate issues.
@@ -33,11 +33,11 @@ If the user did not provide a PR URL/number and the branch is already checked ou
 
 Always check `git worktree list` and your current branch first.
 
-If you are already in a non-main worktree on the branch being reviewed, stay in that worktree and continue there.
+If you are already in a non-main worktree on the branch being reviewed, stay in that worktree and continue there. Do not create a second "review" worktree for the same branch.
 
-Only create or switch worktrees if you are in the main checkout or on the wrong branch/worktree.
+Only create or switch worktrees if the review target is on a different branch from the current checkout, or if the current checkout is the main/default checkout and needs isolation.
 
-If you need to switch:
+If you do need to switch:
 - create a dedicated review worktree first
 - then switch all subsequent work to that worktree path
 - fetch the PR head before checkout so the branch is up to date

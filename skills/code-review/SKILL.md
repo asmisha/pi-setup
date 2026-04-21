@@ -7,6 +7,8 @@ description: Perform a thorough priority-ordered review of branch, PR, staged, o
 
 Use this skill when the goal is to find real problems in code changes, not to rubber-stamp them.
 
+This skill reviews the diff from the current checkout context. Do not create or switch worktrees inside this skill; if the branch under review is already checked out in the current worktree, stay there. Only higher-level PR review workflows should create or switch worktrees, and only when the review target is on a different branch or the current checkout is the main/default branch.
+
 ## Required workflow
 
 ### 1. Prepare the diff (orchestrator only — be fast)

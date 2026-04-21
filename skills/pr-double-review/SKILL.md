@@ -5,13 +5,13 @@ description: "Run a two-pass pull request review in an isolated worktree: a norm
 
 # PR Double Review
 
-Use this skill when a pull request is important enough to justify two sequential review passes instead of a single pass.
+Use this skill when a pull request is important enough to justify two sequential review passes instead of a single pass. Reuse the current non-main worktree when it already contains the branch under review; only create a separate review worktree when the target branch differs from the current branch or the current checkout is the main/default branch.
 
 This skill intentionally reuses the normal PR review workflow for the first cycle, then adds a verified handoff step so the second cycle can review the same changes with better context and sharper focus.
 
 ## Goals
 
-1. Run the first review cycle as a normal PR review in an isolated worktree.
+1. Run the first review cycle outside the user's main/default checkout, reusing the current matching non-main worktree when possible and only creating one when isolation is actually needed.
 2. Capture verified context from the first cycle without turning guesses into facts.
 3. Generate a grounded brief for the second cycle that points reviewers at suspicious areas, relevant code paths, domain facts, and concrete inspection tactics.
 4. Run a second review cycle that uses the brief as guidance, not as truth.
@@ -36,10 +36,10 @@ If the user did not provide a PR URL/number and the branch is already checked ou
 Follow the same worktree discipline as `pr-review`:
 
 - check `git worktree list` and your current branch first
-- stay in the existing non-main review worktree if it already matches the branch under review
-- otherwise create or switch to a dedicated review worktree
-- fetch the PR head before checkout so the review branch is current
-- do not modify the user's main checkout when a separate review worktree is required
+- stay in the existing non-main review worktree if it already matches the branch under review; do not create a second review worktree for the same branch
+- only create or switch to a dedicated review worktree when the target branch differs from the current branch or the current checkout is the main/default branch
+- fetch the PR head before checkout so the review branch is current when a switch is actually needed
+- do not modify the user's main/default checkout when a separate review worktree is required
 
 ### 2. Verify the base branch and prepare one shared review diff
 
