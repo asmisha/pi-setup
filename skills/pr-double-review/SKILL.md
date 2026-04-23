@@ -74,16 +74,19 @@ Reuse the normal PR review structure:
 
 - use the prepared worktree and merge-base diff
 - before launching any pass-1 broad reviewers, spawn one `scout` subagent with the diff file path, diff stat, changed-file list, short summary, and review worktree cwd
-- instruct the scout to inspect the diff and enough nearby code to understand the changed surfaces, categorize the main risk areas, identify suspicious interactions, and recommend whether pass 1 needs **0–6** extra targeted reviewers beyond the core four
+- instruct the scout to inspect the diff and enough nearby code to understand the changed surfaces, categorize the main risk areas, identify the highest-blast-radius changed hunks even when tiny, and recommend whether pass 1 needs **0–6** extra targeted reviewers beyond the core four
+- tell the scout explicitly that file size is not a proxy for importance; for large PRs it should partition coverage by risk surface and code path, and call out migrations, constraint or enum/schema changes, state-machine or event-semantics changes, auth/config/routes/feature-flag changes, and small shared-wrapper or cross-boundary glue changes when present
 - always include the same four core reviewers that `code-review` uses:
   - `correctness-reviewer`
   - `security-reviewer`
   - `performance-reviewer`
   - `simplicity-reviewer`
 - after the scout returns, make the pass-1 coverage plan and decide whether to add **0–6** extra targeted reviewers, staying at **10 total broad review subagents max** for the pass
+- prioritize by critical code paths, rollout risk, and blast radius, not by file size or churn
+- if the diff touches migrations, constraints, `validate: false`, later validation, indexes, backfills, enums, or rollout-sensitive schema changes, add a migration/data-integrity reviewer (named specialist or `worker`) unless the scout explicitly justifies why that extra coverage is unnecessary
 - choose extra reviewers from the available subagent list only when they materially improve coverage for this PR; if a needed specialty is unavailable, use `worker` with a sharply scoped specialty brief
 - optimize for distinct risk coverage, not duplicate broad passes; each extra reviewer must own a different investigation angle
-- common reasons to add extras include migrations/data integrity, API contracts, auth/permissions, frontend/accessibility, background jobs/concurrency, infra/observability, rollout/flags, or another clear domain-specific surface
+- common reasons to add extras include migrations/data integrity, constraint or validation sequencing, API contracts, auth/permissions, frontend/accessibility, background jobs/concurrency, infra/observability, rollout/flags, or another clear domain-specific surface
 - keep the review evidence-backed and priority-ordered
 - do not run tests, builds, or linters unless the user separately asks for verification
 
@@ -151,9 +154,9 @@ Prefer a `worker` subagent for this step unless the environment has a more speci
 
 ### 6. Run the second review cycle with the brief as guidance, not truth
 
-Before launching any pass-2 broad reviewers, spawn one more `scout` subagent with the diff file path, changed-file list, short summary, second-pass review brief path, and review worktree cwd. Instruct it to inspect the diff and nearby code again, use the second-pass brief as guidance rather than truth, and recommend whether pass 2 needs the same extra reviewers, a different set of extra reviewers, or no extras at all.
+Before launching any pass-2 broad reviewers, spawn one more `scout` subagent with the diff file path, changed-file list, short summary, second-pass review brief path, and review worktree cwd. Instruct it to inspect the diff and nearby code again, use the second-pass brief as guidance rather than truth, keep file size out of its prioritization, and recommend whether pass 2 needs the same extra reviewers, a different set of extra reviewers, or no extras at all. It should explicitly re-check small high-blast-radius hunks and any migration/data-integrity sequencing called out in pass 1.
 
-Then run the same four core reviewers again in parallel against the same diff file and same worktree. Use that second scout pass to choose pass-2 extras, staying at **10 total broad review subagents max** for the pass.
+Then run the same four core reviewers again in parallel against the same diff file and same worktree. Use that second scout pass to choose pass-2 extras, staying at **10 total broad review subagents max** for the pass, and again default to a migration/data-integrity reviewer when schema or constraint rollout changes are in scope unless the scout explicitly rules it out.
 
 Give each reviewer:
 
@@ -170,7 +173,7 @@ Explicitly instruct them:
 - use the second-pass brief to focus your investigation, not to inherit conclusions
 - if you are an extra targeted reviewer, stay inside your assigned specialty instead of redoing a generic full review
 - re-verify any pass-1 finding before repeating it
-- look for deeper, cross-file, architectural, business-logic, or maintainability issues that were easier to miss on the first pass
+- look for deeper, cross-file, architectural, business-logic, or maintainability issues that were easier to miss on the first pass, including small high-blast-radius hunks and migration/rollout sequencing
 - call out when a pass-1 suspicion does not hold up after re-checking
 - return only evidence-backed findings
 - if you flag poor-code / poor practices, tie them to a concrete risk such as drift between parallel paths, harder debugging, misleading APIs, unsafe refactors, or needless complexity rather than vague style complaints

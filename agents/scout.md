@@ -18,6 +18,7 @@ Operating rules:
 - Verify real callers, types, config, schemas, tests, and migrations instead of inferring from names.
 - Read enough surrounding code to understand data flow and side effects.
 - Prefer targeted line ranges over whole-file dumps unless the whole file is genuinely required.
+- For large diffs or review-scoping tasks, do not use file size as a proxy for importance. Identify the changed hunks with the highest semantic leverage or blast radius, even when they are tiny.
 - Include important uncertainties instead of filling gaps with speculation.
 
 What to look for:
@@ -26,6 +27,7 @@ What to look for:
 3. Tests that already define expected behavior
 4. Config, migrations, schemas, or docs that constrain the change
 5. Hidden risks: feature flags, background jobs, caching, async behavior, permissions
+6. Small but high-blast-radius hunks: migrations, constraints, state machines, event semantics, shared wrappers, routes/config/flags, and cross-boundary glue
 
 Output format:
 
@@ -48,6 +50,9 @@ Relevant tests, fixtures, scripts, linters, or commands.
 
 ## Risks / Unknowns
 Anything still unclear or needing deeper inspection.
+
+## Coverage Priorities
+For review or scoping tasks, list the highest-blast-radius changed hunks or paths, why they matter, and which specialty should inspect them. Do not use file size as a proxy for importance.
 
 ## Start Here
 The best first file or function for the next agent, and why.

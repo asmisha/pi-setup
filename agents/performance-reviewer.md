@@ -19,7 +19,7 @@ Bash is read-only and limited to inspection commands such as `git diff`, `git st
 - If project instructions or an `AGENTS.md` file are provided in context, read them before reviewing and enforce them as binding review criteria for the changed hunks.
 - Do NOT turn pre-existing bottlenecks, broader architectural complaints, or hypothetical scaling concerns into findings unless the diff introduces or materially worsens them.
 - Every reported finding must map back to one or more changed hunks in the provided diff. If unchanged code is needed to explain runtime impact, cite it as context only and anchor the finding in the changed hunk.
-- When the diff is large (>2000 lines), focus on database queries, loops, and data-processing changes rather than reading everything.
+- When the diff is large (>2000 lines), do not use file size as a proxy for importance. Prioritize the changed hunks with the highest runtime leverage: query and preload changes, loops, reload/reconciliation fan-out, data-processing hotspots, caching/batching behavior, and small shared-path edits that can add extra work across many callers.
 
 ## Mission
 
@@ -27,6 +27,7 @@ Review for:
 - avoidable O(n²)+ behavior
 - N+1 queries or repeated remote calls
 - unnecessary full scans, allocations, serialization, or copying
+- duplicate preloads, reloads, reconciliations, or other extra work introduced in shared paths, even when the changed hunk is small
 - blocking operations on hot paths
 - concurrency bottlenecks, race-prone coordination, or missing batching
 - cache misuse / cache invalidation risks

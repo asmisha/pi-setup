@@ -21,9 +21,10 @@ Give the scout:
 - the diff stat and changed-file list
 - a brief summary of what the change does (2–5 bullet points)
 - the working directory so it can read source files as needed
-- a request to return the changed surfaces, risky interactions, and recommended specialist coverage
+- a request to return the changed surfaces, risky interactions, highest-blast-radius hunks (including small ones), and recommended specialist coverage by risk surface rather than file size
 
 Treat scout output as planning input, not as final findings.
+If the diff changes migrations, constraints, `validate: false`, later validation, indexes, backfills, enums, or rollout-sensitive schema changes, default to adding a migration/data-integrity reviewer unless the scout explicitly rules that extra coverage out.
 
 ## Reviewer prompt skeleton
 

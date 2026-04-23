@@ -91,7 +91,9 @@ Important:
 - Review against the merge base with the PR base branch.
 - Require the `code-review` skill's single `scout` coverage pass to finish before any broad review subagents are launched.
 - Preserve the `code-review` skill's fixed four core reviewers, but make the extra-reviewer decision only after that scout has inspected the diff and nearby code.
+- For large PRs, require that coverage plan to prioritize semantically critical hunks and rollout surfaces over file size, including tiny high-blast-radius changes in migrations, wrappers, config, routing, state machines, and boundary glue.
 - Add **0–6** extra reviewers when they materially improve coverage, staying at **10 total broad review subagents max**.
+- When the diff changes migrations, constraints, `validate: false`, later validation, indexes, backfills, enums, or rollout-sensitive schema behavior, add a migration/data-integrity reviewer unless the scout explicitly justifies why the core set is enough.
 - Choose extra reviewers from the available agent list when possible; if a needed specialty does not exist, use `worker` with a precise specialty brief.
 - Optimize for coverage and comprehensiveness, not redundant broad passes.
 - Do not run tests/builds as part of the review unless the user separately asks for verification.

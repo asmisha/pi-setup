@@ -40,9 +40,12 @@ Give the scout:
 
 Explicitly instruct the scout to:
 - inspect the diff content and enough nearby code to understand the changed surfaces
-- identify the main code paths, subsystems, and interaction boundaries affected by the change
-- call out suspicious or high-risk areas that deserve specialist attention
+- identify the main code paths, subsystems, interaction boundaries, and rollout surfaces affected by the change
+- identify the changed hunks with the highest semantic risk or blast radius even when they are tiny; file size is not a proxy for importance
+- explicitly call out migrations, constraint or enum/schema changes, state-machine or event-semantics changes, auth/config/routes/feature-flag changes, and small shared-wrapper or cross-boundary glue changes when present
+- for large diffs, recommend a coverage plan partitioned by risk surface and code path rather than by file size or the largest files
 - recommend whether the review needs **0–6** extra targeted reviewers beyond the four core reviewers, and if so which distinct specialties are warranted
+- explicitly say whether a migration/data-integrity reviewer is needed when the diff touches migrations, constraints, `validate: false`, later validation, indexes, backfills, enums, or rollout-sensitive schema changes
 - return a concise coverage plan that helps the orchestrator choose reviewers without turning unverified suspicions into findings
 
 The scout is not a substitute for the real review pass. Its job is to make reviewer selection and prompt scoping informed.
@@ -57,13 +60,15 @@ Always include these **four core reviewers** in a single parallel subagent call:
 
 Before you launch reviewers, make a coverage plan from the scout output, diff stat, changed-file list, and your 2–5 bullet summary:
 - Decide whether this review also needs **0–6 additional targeted reviewers**, staying at **10 total broad review subagents max**.
+- Prioritize by critical code paths, rollout risk, and blast radius, not by file size or churn.
+- If the diff touches migrations, constraints, `validate: false`, later validation, indexes, backfills, enums, or rollout-sensitive schema changes, add a migration/data-integrity reviewer (named specialist or `worker`) unless the scout explicitly justifies why that extra coverage is unnecessary.
 - Choose extra reviewers from the available subagent list only when they materially improve coverage for this specific change.
 - Optimize for distinct risk coverage, not redundant overlap. Each extra reviewer must own a different investigation angle.
 - If a suitable named specialist is not available, use `worker` with a sharply scoped specialty brief instead of skipping that risk area.
 - If the scout shows the change is narrow and the core four already cover it well, explicitly say no extra reviewers are needed.
 
 Common triggers for extra reviewers include:
-- database migrations, data backfills, transactions, caching, or data model changes
+- database migrations, constraint or validation sequencing, schema rollouts, data backfills, transactions, caching, or data model changes
 - API contracts, schemas, generated clients, SDKs, or serialization boundaries
 - auth, RBAC, tenancy, secrets, or permissions logic
 - UI flows, forms, state management, or accessibility-sensitive changes
