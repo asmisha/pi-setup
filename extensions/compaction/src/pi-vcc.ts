@@ -389,3 +389,7 @@ export async function invokePiVccHandlers<K extends RoutedCompactionEventName>(
 export function hasPiVccHandler(delegate: PiVccDelegate, eventName: RoutedCompactionEventName): boolean {
   return (delegate.handlers[eventName]?.length ?? 0) > 0;
 }
+
+export function canAutoUsePiVccDelegate(delegate: PiVccDelegate): boolean {
+  return hasPiVccHandler(delegate, "turn_end") || (hasPiVccHandler(delegate, "session_before_compact") && delegate.compactionInstruction !== null);
+}

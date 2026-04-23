@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { hasPiVccHandler, invokePiVccHandlers, resolvePiVccHandlersFromModule } from "../src/pi-vcc.ts";
+import { canAutoUsePiVccDelegate, hasPiVccHandler, invokePiVccHandlers, resolvePiVccHandlersFromModule } from "../src/pi-vcc.ts";
 
 test("resolvePiVccHandlersFromModule captures handlers from an extension factory default export", async () => {
   const callLog: string[] = [];
@@ -30,6 +30,13 @@ test("resolvePiVccHandlersFromModule falls back to a direct default handler expo
 
   assert.equal(hasPiVccHandler(delegate, "session_before_compact"), true);
   assert.deepEqual(await invokePiVccHandlers(delegate, "session_before_compact", {} as any, {} as any), { cancel: true });
+});
+
+test("canAutoUsePiVccDelegate only auto-enables delegates that can drive compaction", () => {
+  assert.equal(canAutoUsePiVccDelegate({ handlers: { session_start: [async () => undefined] }, compactionInstruction: null } as any), false);
+  assert.equal(canAutoUsePiVccDelegate({ handlers: { turn_end: [async () => undefined] }, compactionInstruction: null } as any), true);
+  assert.equal(canAutoUsePiVccDelegate({ handlers: { session_before_compact: [async () => undefined] }, compactionInstruction: null } as any), false);
+  assert.equal(canAutoUsePiVccDelegate({ handlers: { session_before_compact: [async () => undefined] }, compactionInstruction: "delegated instruction" } as any), true);
 });
 
 test("resolvePiVccHandlersFromModule wraps a compact export into session_before_compact", async () => {

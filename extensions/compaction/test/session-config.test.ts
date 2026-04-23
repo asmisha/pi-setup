@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildCompactionModeEntry, COMPACTION_MODE_ENTRY_TYPE, parseCompactionMode, readCompactionMode } from "../src/session-config.ts";
+import { buildCompactionModeEntry, COMPACTION_MODE_ENTRY_TYPE, parseCompactionMode, readCompactionMode, readStoredCompactionMode } from "../src/session-config.ts";
 
 test("parseCompactionMode accepts local and pi-vcc aliases", () => {
   assert.equal(parseCompactionMode("local"), "local");
@@ -10,7 +10,7 @@ test("parseCompactionMode accepts local and pi-vcc aliases", () => {
   assert.equal(parseCompactionMode("unknown"), null);
 });
 
-test("readCompactionMode defaults to local and uses the latest valid custom entry", () => {
+test("readCompactionMode auto-selects installed pi-vcc by default and uses the latest valid custom entry", () => {
   const entries = [
     {
       type: "custom",
@@ -29,6 +29,9 @@ test("readCompactionMode defaults to local and uses the latest valid custom entr
     },
   ] as any;
 
+  assert.equal(readStoredCompactionMode([] as any), null);
   assert.equal(readCompactionMode([] as any), "local");
-  assert.equal(readCompactionMode(entries), "local");
+  assert.equal(readCompactionMode([] as any, true), "pi-vcc");
+  assert.equal(readStoredCompactionMode(entries), "local");
+  assert.equal(readCompactionMode(entries, true), "local");
 });

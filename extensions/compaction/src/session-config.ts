@@ -3,6 +3,7 @@ import type { SessionEntry } from "@mariozechner/pi-coding-agent";
 export const COMPACTION_MODE_ENTRY_TYPE = "compaction-extension-mode";
 export const COMPACTION_MODES = ["local", "pi-vcc"] as const;
 export type CompactionMode = (typeof COMPACTION_MODES)[number];
+export type StoredCompactionMode = CompactionMode | null;
 
 export type CompactionModeEntry = {
   mode: CompactionMode;
@@ -24,8 +25,8 @@ export function parseCompactionMode(value: string | null | undefined): Compactio
   return null;
 }
 
-export function readCompactionMode(entries: SessionEntry[]): CompactionMode {
-  let current = DEFAULT_COMPACTION_MODE;
+export function readStoredCompactionMode(entries: SessionEntry[]): StoredCompactionMode {
+  let current: StoredCompactionMode = null;
   for (const entry of entries) {
     if (entry.type !== "custom" || entry.customType !== COMPACTION_MODE_ENTRY_TYPE) continue;
     if (!isRecord(entry.data)) continue;
@@ -34,6 +35,10 @@ export function readCompactionMode(entries: SessionEntry[]): CompactionMode {
     current = parsed;
   }
   return current;
+}
+
+export function readCompactionMode(entries: SessionEntry[], piVccAvailable = false): CompactionMode {
+  return readStoredCompactionMode(entries) ?? (piVccAvailable ? "pi-vcc" : DEFAULT_COMPACTION_MODE);
 }
 
 export function buildCompactionModeEntry(mode: CompactionMode, updatedAt: string): CompactionModeEntry {

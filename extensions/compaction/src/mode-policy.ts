@@ -1,10 +1,11 @@
-import type { CompactionMode } from "./session-config.ts";
+import type { CompactionMode, StoredCompactionMode } from "./session-config.ts";
 
 export type CompactionExecutionMode = "local" | "pi-vcc" | "open";
 
-export function resolveCompactionExecutionMode(mode: CompactionMode, piVccAvailable: boolean): CompactionExecutionMode {
+export function resolveCompactionExecutionMode(mode: StoredCompactionMode, piVccAvailable: boolean): CompactionExecutionMode {
   if (mode === "local") return "local";
-  return piVccAvailable ? "pi-vcc" : "open";
+  if (mode === "pi-vcc") return piVccAvailable ? "pi-vcc" : "open";
+  return piVccAvailable ? "pi-vcc" : "local";
 }
 
 export function canSelectCompactionMode(mode: CompactionMode, piVccAvailable: boolean): boolean {
