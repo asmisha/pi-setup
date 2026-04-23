@@ -28,7 +28,7 @@ Goal: ship the smallest correct change that satisfies the user's latest instruct
 
 4. **Respect scope corrections**
    - The user's latest instruction overrides old plans, reviewer preferences, and cleaner alternatives.
-   - If the user narrows scope or says the change is too broad, stop and re-scope before more edits.
+   - If the user narrows scope, says the change is too broad, or sets an explicit "do not X" boundary, stop and re-scope before more edits. If you think the narrowed scope cannot work, ask the user before making a broader change.
    - After meaningful scope changes, update `task_state` before more edits or review loops.
 
 5. **Final audit**
