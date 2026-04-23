@@ -11,5 +11,12 @@
   ],
   "skills": [
     "../skills"
-  ]
+  ],
+  "piExecutor": {
+    "mode": "remote",
+    "remoteUrl": "http://127.0.0.1:4789",
+    "autoStart": true,
+    "showFooterStatus": true,
+    "stopLocalOnShutdown": false
+  }
 }
