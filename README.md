@@ -55,22 +55,25 @@ A shell script that inspects the current PR with `gh`, ranks recent contributors
 
 ## Shared Pi project settings
 
-This repo now includes `.pi/settings.json` to sync the repo-scoped Pi setup between machines.
+This repo keeps only repo-local wiring in `.pi/settings.json`:
 
-Verified from Pi's package docs and the checked-in settings file:
-
-- project-local `packages` are auto-installed by Pi on startup if missing
-- the tracked package list currently includes:
-  - `npm:pi-subagents`
-  - `git:github.com/jo-inc/pi-mem`
-  - `https://github.com/SamuelLHuber/pi-fff`
-  - `npm:pi-executor`
-  - `npm:@robhowley/pi-structured-return`
-- the repo-local `extensions/` and `skills/` directories are wired through relative paths in `.pi/settings.json`
+- `extensions` points at `../extensions`
+- `skills` points at `../skills`
 - Pi auto-loads the repo `task-tracker` and `compaction` extensions from `extensions/`
-- project installs land under `.pi/npm/` and `.pi/git/`, which are intentionally gitignored
 
-This keeps the extension/package list in the repo so a new machine can pick it up without redoing the package install list by hand.
+Pi packages should be installed at the user level, not under `Projects/pi-setup/.pi`.
+
+### User-level packages to install
+
+Install these packages globally for your Pi user config:
+
+- `npm:pi-subagents`
+- `git:github.com/jo-inc/pi-mem`
+- `https://github.com/SamuelLHuber/pi-fff`
+- `npm:pi-executor`
+- `npm:@robhowley/pi-structured-return`
+
+This repo intentionally documents the package list here instead of declaring `packages` in `.pi/settings.json`, so opening the repo does not create repo-local installs under `.pi/git/` or `.pi/npm/`.
 
 ## Local Pi wiring for task tracking and compaction
 
