@@ -4,6 +4,7 @@ import { convertToLlm, serializeConversation } from "@mariozechner/pi-coding-age
 import { buildCompactionPrompt, COMPACTION_SYSTEM_PROMPT, normalizeAdvisory, parseJsonObject, renderAdvisorySummary } from "./src/compaction.ts";
 import { SUMMARY_MAX_TOKENS } from "./src/config.ts";
 import { canSelectCompactionMode, formatPiVccUnavailableMessage, resolveCompactionExecutionMode } from "./src/mode-policy.ts";
+import { formatPiLcmUnavailableMessage, installHostedPiLcm, resolvePiLcmAvailability } from "./src/pi-lcm.ts";
 import { canAutoUsePiVccDelegate, hasPiVccHandler, invokePiVccHandlers, loadPiVccDelegate } from "./src/pi-vcc.ts";
 import { evaluateThresholdCompaction, resolvePreviousContextPercentAfterTurnEnd, resolveTurnEndCompactionAction } from "./src/turn-end-policy.ts";
 import { buildCompactionModeEntry, COMPACTION_MODE_ENTRY_TYPE, formatCompactionMode, getCompactionModeChoices, parseCompactionMode, readCompactionMode, readStoredCompactionMode } from "./src/session-config.ts";
@@ -19,11 +20,17 @@ function getErrorMessage(error: unknown): string {
 
 const LOCAL_COMPACTION_INSTRUCTIONS = "Generate a concise structured advisory for the discarded conversation span. Keep durable task-tracker state separate from the compaction summary.";
 
-export default function compactionExtension(pi: ExtensionAPI) {
+export default async function compactionExtension(pi: ExtensionAPI) {
   let previousContextPercent: number | null = null;
   let compactionInFlight = false;
   let lastCompactionAt = 0;
   let warnedPiVccUnavailable = false;
+  let warnedPiLcmUnavailable = false;
+  const hostedPiLcm = await installHostedPiLcm(
+    pi,
+    process.cwd(),
+    (ctx) => readStoredCompactionMode(ctx.sessionManager.getEntries()) === "pi-lcm",
+  );
 
   const resetLocalCompactionState = () => {
     previousContextPercent = null;
@@ -39,11 +46,22 @@ export default function compactionExtension(pi: ExtensionAPI) {
     warnedPiVccUnavailable = false;
   };
 
+  const clearPiLcmUnavailableWarning = () => {
+    warnedPiLcmUnavailable = false;
+  };
+
   const warnPiVccUnavailable = (ctx: ExtensionContext, message: string) => {
     if (!warnedPiVccUnavailable && ctx.hasUI) {
       ctx.ui.notify(message, "warning");
     }
     warnedPiVccUnavailable = true;
+  };
+
+  const warnPiLcmUnavailable = (ctx: ExtensionContext, message: string) => {
+    if (!warnedPiLcmUnavailable && ctx.hasUI) {
+      ctx.ui.notify(message, "warning");
+    }
+    warnedPiLcmUnavailable = true;
   };
 
   async function getPiVccDelegateOrNull(ctx: ExtensionContext, warnIfUnavailable = true) {
@@ -65,23 +83,37 @@ export default function compactionExtension(pi: ExtensionAPI) {
       return { configuredMode, executionMode: "local" as const, delegate: null };
     }
 
+    if (configuredMode === "pi-lcm") {
+      const piLcmAvailable = hostedPiLcm.ok;
+      if (piLcmAvailable) {
+        clearPiLcmUnavailableWarning();
+      } else {
+        warnPiLcmUnavailable(ctx, formatPiLcmUnavailableMessage(hostedPiLcm.error));
+      }
+      return {
+        configuredMode,
+        executionMode: resolveCompactionExecutionMode(configuredMode, false, piLcmAvailable),
+        delegate: null,
+      };
+    }
+
     const delegate = await getPiVccDelegateOrNull(ctx, configuredMode === "pi-vcc");
     const piVccAvailable = configuredMode === "pi-vcc"
       ? Boolean(delegate)
       : Boolean(delegate && canAutoUsePiVccDelegate(delegate));
     return {
       configuredMode,
-      executionMode: resolveCompactionExecutionMode(configuredMode, piVccAvailable),
+      executionMode: resolveCompactionExecutionMode(configuredMode, piVccAvailable, false),
       delegate,
     };
   }
 
-  function requestThresholdCompaction(event: TurnEndEvent, ctx: ExtensionContext, customInstructions: string) {
+  function requestThresholdCompaction(event: TurnEndEvent, ctx: ExtensionContext, customInstructions?: string) {
     const shouldAutoResume = Array.isArray(event.toolResults) && event.toolResults.length > 0;
 
     compactionInFlight = true;
     ctx.compact({
-      customInstructions,
+      ...(customInstructions ? { customInstructions } : {}),
       onComplete: () => {
         handleCompactionCompleted();
         if (shouldAutoResume) {
@@ -226,6 +258,12 @@ export default function compactionExtension(pi: ExtensionAPI) {
       return;
     }
 
+    if (executionMode === "pi-lcm") {
+      previousContextPercent = resolvePreviousContextPercentAfterTurnEnd({ thresholdDecision, action });
+      requestThresholdCompaction(event, ctx);
+      return;
+    }
+
     previousContextPercent = resolvePreviousContextPercentAfterTurnEnd({ thresholdDecision, action });
     requestThresholdCompaction(
       event,
@@ -236,7 +274,7 @@ export default function compactionExtension(pi: ExtensionAPI) {
 
   pi.on("session_before_compact", async (event, ctx) => {
     const { executionMode, delegate } = await resolveCompactionRuntime(ctx);
-    if (executionMode === "open") return;
+    if (executionMode === "open" || executionMode === "pi-lcm") return;
     if (executionMode === "pi-vcc" && delegate) {
       if (!hasPiVccHandler(delegate, "session_before_compact")) {
         warnPiVccUnavailable(ctx, `${delegate.packageName} did not expose a session_before_compact hook. Failing open.`);
@@ -257,12 +295,13 @@ export default function compactionExtension(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("compaction-mode", {
-    description: "Show or set the compaction mode for this session. Usage: /compaction-mode [local|pi-vcc]",
+    description: "Show or set the compaction mode for this session. Usage: /compaction-mode [local|pi-vcc|pi-lcm]",
     handler: async (args, ctx) => {
       const input = args.trim();
       if (!input) {
         const storedMode = readStoredCompactionMode(ctx.sessionManager.getEntries());
         const availability = await loadPiVccDelegate(ctx.cwd);
+        const lcmAvailability = resolvePiLcmAvailability(ctx.cwd);
         const autoPiVccAvailable = availability.ok && canAutoUsePiVccDelegate(availability.delegate);
         const currentMode = readCompactionMode(ctx.sessionManager.getEntries(), autoPiVccAvailable);
         const lines = [`Current compaction mode: ${formatCompactionMode(currentMode)}${storedMode ? "" : " (default)"}`];
@@ -277,6 +316,16 @@ export default function compactionExtension(pi: ExtensionAPI) {
             lines.push("Current pi-vcc mode behavior: fail open (no local fallback).");
           }
         }
+        if (hostedPiLcm.ok) {
+          lines.push(`pi-lcm/L7: hosted as ${hostedPiLcm.packageName} (${hostedPiLcm.resolvedPath}); events: ${hostedPiLcm.registeredEvents.join(", ")}`);
+        } else if (lcmAvailability.ok) {
+          lines.push(`pi-lcm/L7: package available as ${lcmAvailability.packageName} (${lcmAvailability.resolvedPath}), but it was not hosted by this extension; run /reload after installing or fixing it.`);
+        } else {
+          lines.push(`pi-lcm/L7: unavailable (${hostedPiLcm.error})`);
+        }
+        if (currentMode === "pi-lcm" && !hostedPiLcm.ok) {
+          lines.push("Current pi-lcm/L7 mode behavior: fail open (no local fallback).");
+        }
         lines.push(`Usage: /compaction-mode [${getCompactionModeChoices().join("|")}]`);
         ctx.ui.notify(lines.join("\n"), "info");
         return;
@@ -290,11 +339,16 @@ export default function compactionExtension(pi: ExtensionAPI) {
 
       const availability = nextMode === "pi-vcc" ? await loadPiVccDelegate(ctx.cwd) : null;
       const piVccAvailable = availability?.ok === true && canAutoUsePiVccDelegate(availability.delegate);
-      if (!canSelectCompactionMode(nextMode, piVccAvailable)) {
-        const unavailableReason = availability?.ok === true
-          ? "the installed package does not expose compaction-generation hooks"
-          : availability?.error ?? "pi-vcc is unavailable";
-        ctx.ui.notify(`Cannot select pi-vcc compaction for this session: ${unavailableReason}`, "error");
+      const piLcmAvailable = hostedPiLcm.ok;
+      if (!canSelectCompactionMode(nextMode, piVccAvailable, piLcmAvailable)) {
+        const unavailableReason = nextMode === "pi-vcc"
+          ? availability?.ok === true
+            ? "the installed package does not expose compaction-generation hooks"
+            : availability?.error ?? "pi-vcc is unavailable"
+          : nextMode === "pi-lcm"
+            ? hostedPiLcm.error
+            : "selected mode is unavailable";
+        ctx.ui.notify(`Cannot select ${formatCompactionMode(nextMode)} compaction for this session: ${unavailableReason}`, "error");
         return;
       }
       const delegatePath = availability?.ok ? availability.delegate.resolvedPath : null;
@@ -302,6 +356,7 @@ export default function compactionExtension(pi: ExtensionAPI) {
 
       pi.appendEntry(COMPACTION_MODE_ENTRY_TYPE, buildCompactionModeEntry(nextMode, new Date().toISOString()));
       clearPiVccUnavailableWarning();
+      clearPiLcmUnavailableWarning();
       resetLocalCompactionState();
 
       if (nextMode === "pi-vcc" && availability?.ok) {
@@ -323,7 +378,9 @@ export default function compactionExtension(pi: ExtensionAPI) {
       ctx.ui.notify(
         nextMode === "pi-vcc"
           ? `Compaction mode for this session set to pi-vcc. Using ${delegateName} (${delegatePath}).`
-          : "Compaction mode for this session set to local.",
+          : nextMode === "pi-lcm"
+            ? `Compaction mode for this session set to pi-lcm/L7. ${hostedPiLcm.ok ? hostedPiLcm.packageName : "pi-lcm"} is hosted and will keep receiving message_end events; this extension only triggers ctx.compact().`
+            : "Compaction mode for this session set to local.",
         "info",
       );
     },

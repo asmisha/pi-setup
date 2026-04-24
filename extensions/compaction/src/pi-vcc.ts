@@ -14,6 +14,7 @@ import type {
   SessionTreeEvent,
   TurnEndEvent,
 } from "@mariozechner/pi-coding-agent";
+import { resolveInstalledPiPackage } from "./pi-package.ts";
 
 export const PI_VCC_PACKAGE_CANDIDATES = ["pi-vcc", "@sting8k/pi-vcc"] as const;
 
@@ -261,23 +262,7 @@ function resolveExtensionEntryPath(packageRoot: string, manifest: PiPackageManif
 }
 
 function resolveInstalledPiVccPackage(cwd: string): ResolvedPiVccPackage | null {
-  const requireFromCwd = createRequire(resolve(cwd, "__pi_compaction_loader__.cjs"));
-  for (const candidate of PI_VCC_PACKAGE_CANDIDATES) {
-    try {
-      const packageJsonPath = requireFromCwd.resolve(`${candidate}/package.json`);
-      const packageRoot = dirname(packageJsonPath);
-      const manifest = JSON.parse(readFileSync(packageJsonPath, "utf8")) as PiPackageManifest;
-      return {
-        packageName: manifest.name?.trim() || candidate,
-        packageJsonPath,
-        packageRoot,
-        entryPath: resolveExtensionEntryPath(packageRoot, manifest),
-      };
-    } catch {
-      // keep trying candidates
-    }
-  }
-  return null;
+  return resolveInstalledPiPackage(cwd, PI_VCC_PACKAGE_CANDIDATES);
 }
 
 async function loadRuntimeModule(resolvedPackage: ResolvedPiVccPackage, sourcePath: string): Promise<unknown> {

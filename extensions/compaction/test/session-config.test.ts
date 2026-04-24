@@ -2,11 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildCompactionModeEntry, COMPACTION_MODE_ENTRY_TYPE, parseCompactionMode, readCompactionMode, readStoredCompactionMode } from "../src/session-config.ts";
 
-test("parseCompactionMode accepts local and pi-vcc aliases", () => {
+test("parseCompactionMode accepts local, pi-vcc, and pi-lcm/L7 aliases", () => {
   assert.equal(parseCompactionMode("local"), "local");
   assert.equal(parseCompactionMode("pi-vcc"), "pi-vcc");
   assert.equal(parseCompactionMode("pivcc"), "pi-vcc");
   assert.equal(parseCompactionMode("vcc"), "pi-vcc");
+  assert.equal(parseCompactionMode("pi-lcm"), "pi-lcm");
+  assert.equal(parseCompactionMode("lcm"), "pi-lcm");
+  assert.equal(parseCompactionMode("pi-l7"), "pi-lcm");
+  assert.equal(parseCompactionMode("l7"), "pi-lcm");
   assert.equal(parseCompactionMode("unknown"), null);
 });
 

@@ -1,7 +1,7 @@
 import type { SessionEntry } from "@mariozechner/pi-coding-agent";
 
 export const COMPACTION_MODE_ENTRY_TYPE = "compaction-extension-mode";
-export const COMPACTION_MODES = ["local", "pi-vcc"] as const;
+export const COMPACTION_MODES = ["local", "pi-vcc", "pi-lcm"] as const;
 export type CompactionMode = (typeof COMPACTION_MODES)[number];
 export type StoredCompactionMode = CompactionMode | null;
 
@@ -22,6 +22,7 @@ export function parseCompactionMode(value: string | null | undefined): Compactio
   if (!normalized) return null;
   if (normalized === "local") return "local";
   if (normalized === "pi-vcc" || normalized === "pi_vcc" || normalized === "pivcc" || normalized === "vcc") return "pi-vcc";
+  if (normalized === "pi-lcm" || normalized === "pi_lcm" || normalized === "pilcm" || normalized === "lcm" || normalized === "pi-l7" || normalized === "pi_l7" || normalized === "pil7" || normalized === "l7") return "pi-lcm";
   return null;
 }
 
@@ -46,7 +47,9 @@ export function buildCompactionModeEntry(mode: CompactionMode, updatedAt: string
 }
 
 export function formatCompactionMode(mode: CompactionMode): string {
-  return mode === "pi-vcc" ? "pi-vcc" : "local";
+  if (mode === "pi-vcc") return "pi-vcc";
+  if (mode === "pi-lcm") return "pi-lcm/L7";
+  return "local";
 }
 
 export function getCompactionModeChoices(): string[] {

@@ -61,13 +61,15 @@ test("evaluateThresholdCompaction preserves in-flight and cooldown guards at the
   );
 });
 
-test("resolveTurnEndCompactionAction gates pi-vcc turn_end hooks behind the threshold decision", () => {
+test("resolveTurnEndCompactionAction gates delegated turn_end hooks behind the threshold decision", () => {
   assert.equal(resolveTurnEndCompactionAction("open", true, true), "skip");
   assert.equal(resolveTurnEndCompactionAction("local", false, false), "skip");
   assert.equal(resolveTurnEndCompactionAction("local", false, true), "request-compaction");
   assert.equal(resolveTurnEndCompactionAction("pi-vcc", true, false), "skip");
   assert.equal(resolveTurnEndCompactionAction("pi-vcc", true, true), "delegate-turn_end");
   assert.equal(resolveTurnEndCompactionAction("pi-vcc", false, true), "request-compaction");
+  assert.equal(resolveTurnEndCompactionAction("pi-lcm", false, false), "skip");
+  assert.equal(resolveTurnEndCompactionAction("pi-lcm", false, true), "request-compaction");
 });
 
 test("resolvePreviousContextPercentAfterTurnEnd resets threshold state when no compaction path actually ran", () => {
