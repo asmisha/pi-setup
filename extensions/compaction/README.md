@@ -2,7 +2,7 @@
 
 A small Pi extension that only triggers compaction earlier than Pi's default policy.
 
-By default it watches context usage at `turn_end` and calls `ctx.compact()` once usage crosses **65%**.
+By default it watches context usage at `turn_end` and calls `ctx.compact()` once usage crosses **65%**, passing the repo's local advisory focus as `customInstructions`.
 
 It does **not** own compaction content, routing, task tracking, UI widgets, or durable task state.
 
@@ -16,12 +16,13 @@ This extension is always on when loaded.
 - `session_start` and `session_tree` reset the threshold detector.
 - `session_compact` clears in-flight state and starts the cooldown timer.
 - The extension does not register `session_before_compact`.
-- The extension does not pass VCC/LCM custom instructions.
-- The extension does not provide a local summary prompt.
+- The extension passes this custom focus to Pi's built-in compaction:
+  `Generate a concise structured advisory for the discarded conversation span. Keep durable task-tracker state separate from the compaction summary.`
+- The extension does not provide a local summary prompt or compaction result.
 
 ## Interaction with compactor packages
 
-Actual compaction content is controlled by whichever Pi extension is loaded and handles `session_before_compact`, for example VCC or LCM.
+Actual compaction content is controlled by whichever Pi extension is loaded and handles `session_before_compact`, for example VCC or LCM. Those extensions will also see the `customInstructions` passed by this threshold trigger.
 
 Recommended clean architecture for comparing compactors:
 

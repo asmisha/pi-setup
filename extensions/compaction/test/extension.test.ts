@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import compactionExtension from "../index.ts";
 
-test("extension only registers lifecycle/turn handlers and requests plain compaction at threshold", async () => {
+test("extension only registers lifecycle/turn handlers and requests compaction with local custom instructions at threshold", async () => {
   const handlers = new Map<string, Function[]>();
   const pi = {
     on(eventName: string, handler: Function) {
@@ -30,5 +30,8 @@ test("extension only registers lifecycle/turn handlers and requests plain compac
 
   assert.equal(typeof compactOptions?.onComplete, "function");
   assert.equal(typeof compactOptions?.onError, "function");
-  assert.equal("customInstructions" in compactOptions, false);
+  assert.equal(
+    compactOptions?.customInstructions,
+    "Generate a concise structured advisory for the discarded conversation span. Keep durable task-tracker state separate from the compaction summary.",
+  );
 });

@@ -1,6 +1,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { evaluateThresholdCompaction, resolvePreviousContextPercentAfterTurnEnd } from "./src/turn-end-policy.ts";
 
+const LOCAL_COMPACTION_INSTRUCTIONS = "Generate a concise structured advisory for the discarded conversation span. Keep durable task-tracker state separate from the compaction summary.";
+
 export default function compactionExtension(pi: ExtensionAPI) {
   let previousContextPercent: number | null = null;
   let compactionInFlight = false;
@@ -19,6 +21,7 @@ export default function compactionExtension(pi: ExtensionAPI) {
   function requestThresholdCompaction(ctx: ExtensionContext) {
     compactionInFlight = true;
     ctx.compact({
+      customInstructions: LOCAL_COMPACTION_INSTRUCTIONS,
       onComplete: () => {
         handleCompactionCompleted();
       },
