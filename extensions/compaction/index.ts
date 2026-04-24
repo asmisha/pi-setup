@@ -317,14 +317,14 @@ export default async function compactionExtension(pi: ExtensionAPI) {
           }
         }
         if (hostedPiLcm.ok) {
-          lines.push(`pi-lcm/L7: hosted as ${hostedPiLcm.packageName} (${hostedPiLcm.resolvedPath}); events: ${hostedPiLcm.registeredEvents.join(", ")}`);
+          lines.push(`pi-lcm: hosted as ${hostedPiLcm.packageName} (${hostedPiLcm.resolvedPath}); events: ${hostedPiLcm.registeredEvents.join(", ")}`);
         } else if (lcmAvailability.ok) {
-          lines.push(`pi-lcm/L7: package available as ${lcmAvailability.packageName} (${lcmAvailability.resolvedPath}), but it was not hosted by this extension; run /reload after installing or fixing it.`);
+          lines.push(`pi-lcm: package available as ${lcmAvailability.packageName} (${lcmAvailability.resolvedPath}), but it was not hosted by this extension; run /reload after installing or fixing it.`);
         } else {
-          lines.push(`pi-lcm/L7: unavailable (${hostedPiLcm.error})`);
+          lines.push(`pi-lcm: unavailable (${hostedPiLcm.error})`);
         }
         if (currentMode === "pi-lcm" && !hostedPiLcm.ok) {
-          lines.push("Current pi-lcm/L7 mode behavior: fail open (no local fallback).");
+          lines.push("Current pi-lcm mode behavior: fail open (no local fallback).");
         }
         lines.push(`Usage: /compaction-mode [${getCompactionModeChoices().join("|")}]`);
         ctx.ui.notify(lines.join("\n"), "info");
@@ -379,7 +379,7 @@ export default async function compactionExtension(pi: ExtensionAPI) {
         nextMode === "pi-vcc"
           ? `Compaction mode for this session set to pi-vcc. Using ${delegateName} (${delegatePath}).`
           : nextMode === "pi-lcm"
-            ? `Compaction mode for this session set to pi-lcm/L7. ${hostedPiLcm.ok ? hostedPiLcm.packageName : "pi-lcm"} is hosted and will keep receiving message_end events; this extension only triggers ctx.compact().`
+            ? `Compaction mode for this session set to pi-lcm. ${hostedPiLcm.ok ? hostedPiLcm.packageName : "pi-lcm"} is hosted and will keep receiving message_end events; this extension only triggers ctx.compact().`
             : "Compaction mode for this session set to local.",
         "info",
       );

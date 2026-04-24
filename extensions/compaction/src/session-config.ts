@@ -22,7 +22,7 @@ export function parseCompactionMode(value: string | null | undefined): Compactio
   if (!normalized) return null;
   if (normalized === "local") return "local";
   if (normalized === "pi-vcc" || normalized === "pi_vcc" || normalized === "pivcc" || normalized === "vcc") return "pi-vcc";
-  if (normalized === "pi-lcm" || normalized === "pi_lcm" || normalized === "pilcm" || normalized === "lcm" || normalized === "pi-l7" || normalized === "pi_l7" || normalized === "pil7" || normalized === "l7") return "pi-lcm";
+  if (normalized === "pi-lcm" || normalized === "pi_lcm" || normalized === "pilcm" || normalized === "lcm") return "pi-lcm";
   return null;
 }
 
@@ -48,7 +48,7 @@ export function buildCompactionModeEntry(mode: CompactionMode, updatedAt: string
 
 export function formatCompactionMode(mode: CompactionMode): string {
   if (mode === "pi-vcc") return "pi-vcc";
-  if (mode === "pi-lcm") return "pi-lcm/L7";
+  if (mode === "pi-lcm") return "pi-lcm";
   return "local";
 }
 

@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { resolveInstalledPiPackage, type ResolvedPiExtensionPackage } from "./pi-package.ts";
 
-export const PI_LCM_PACKAGE_CANDIDATES = ["pi-lcm", "pi-l7"] as const;
+export const PI_LCM_PACKAGE_CANDIDATES = ["pi-lcm"] as const;
 
 export type HostedPiLcmResult =
   | {
@@ -207,5 +207,5 @@ export async function installHostedPiLcm(
 }
 
 export function formatPiLcmUnavailableMessage(reason: string): string {
-  return `pi-lcm/L7 compaction is selected for this session, but ${reason}. Compaction will fail open until pi-lcm becomes available.`;
+  return `pi-lcm compaction is selected for this session, but ${reason}. Compaction will fail open until pi-lcm becomes available.`;
 }

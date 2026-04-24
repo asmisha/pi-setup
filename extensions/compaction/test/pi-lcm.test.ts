@@ -40,6 +40,6 @@ test("hosted pi-lcm API lets LCM keep message subscriptions but gates its compac
 
 test("formatPiLcmUnavailableMessage describes fail-open behavior", () => {
   const message = formatPiLcmUnavailableMessage("pi-lcm is not installed");
-  assert.match(message, /pi-lcm\/L7/);
+  assert.match(message, /pi-lcm/);
   assert.match(message, /fail open/i);
 });
