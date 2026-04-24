@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { evaluateThresholdCompaction, resolvePreviousContextPercentAfterTurnEnd, resolveTurnEndCompactionAction } from "../src/turn-end-policy.ts";
+import { evaluateThresholdCompaction, resolvePreviousContextPercentAfterTurnEnd } from "../src/turn-end-policy.ts";
 
-test("evaluateThresholdCompaction only triggers after crossing the existing threshold and resets on missing usage", () => {
+test("evaluateThresholdCompaction only triggers after crossing the threshold and resets on missing usage", () => {
   assert.deepEqual(
     evaluateThresholdCompaction({
       currentPercent: null,
@@ -61,37 +61,26 @@ test("evaluateThresholdCompaction preserves in-flight and cooldown guards at the
   );
 });
 
-test("resolveTurnEndCompactionAction gates delegated turn_end hooks behind the threshold decision", () => {
-  assert.equal(resolveTurnEndCompactionAction("open", true, true), "skip");
-  assert.equal(resolveTurnEndCompactionAction("local", false, false), "skip");
-  assert.equal(resolveTurnEndCompactionAction("local", false, true), "request-compaction");
-  assert.equal(resolveTurnEndCompactionAction("pi-vcc", true, false), "skip");
-  assert.equal(resolveTurnEndCompactionAction("pi-vcc", true, true), "delegate-turn_end");
-  assert.equal(resolveTurnEndCompactionAction("pi-vcc", false, true), "request-compaction");
-  assert.equal(resolveTurnEndCompactionAction("pi-lcm", false, false), "skip");
-  assert.equal(resolveTurnEndCompactionAction("pi-lcm", false, true), "request-compaction");
-});
-
-test("resolvePreviousContextPercentAfterTurnEnd resets threshold state when no compaction path actually ran", () => {
-  const thresholdDecision = {
+test("resolvePreviousContextPercentAfterTurnEnd resets only when a threshold crossing had no compaction request", () => {
+  const crossingDecision = {
     nextPreviousContextPercent: 70,
     shouldCompact: true,
   };
+  const noCrossingDecision = {
+    nextPreviousContextPercent: 60,
+    shouldCompact: false,
+  };
 
   assert.equal(
-    resolvePreviousContextPercentAfterTurnEnd({ thresholdDecision, action: "skip" }),
+    resolvePreviousContextPercentAfterTurnEnd({ thresholdDecision: noCrossingDecision, didRequestCompaction: false }),
+    60,
+  );
+  assert.equal(
+    resolvePreviousContextPercentAfterTurnEnd({ thresholdDecision: crossingDecision, didRequestCompaction: false }),
     null,
   );
   assert.equal(
-    resolvePreviousContextPercentAfterTurnEnd({ thresholdDecision, action: "delegate-turn_end", delegateTurnEndFailed: true }),
-    null,
-  );
-  assert.equal(
-    resolvePreviousContextPercentAfterTurnEnd({ thresholdDecision, action: "delegate-turn_end" }),
-    70,
-  );
-  assert.equal(
-    resolvePreviousContextPercentAfterTurnEnd({ thresholdDecision, action: "request-compaction" }),
+    resolvePreviousContextPercentAfterTurnEnd({ thresholdDecision: crossingDecision, didRequestCompaction: true }),
     70,
   );
 });
