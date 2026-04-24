@@ -214,7 +214,7 @@ If the user asks for a PR comment after the double review:
 
 - load `pr-description`
 - load `writing-voice`
-- prefer a subagent drafting pass using `openai-codex/gpt-5.3-codex-spark`
+- prefer a subagent drafting pass with the `writing-voice` skill
 - draft from the final merged findings only
 - do not resurrect a pass-1 concern that the second pass did not confirm
 - include findings that cannot be mapped to a specific diff line in the review body text; do not silently drop them

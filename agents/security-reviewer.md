@@ -1,7 +1,6 @@
 ---
 name: security-reviewer
 description: Specialized reviewer for security vulnerabilities, auth gaps, injection risks, secret exposure, permissions, and unsafe defaults in code or specs
-model: openai-codex/gpt-5.4
 tools: read, grep, find, ls, bash, write
 inheritProjectContext: true
 inheritSkills: true

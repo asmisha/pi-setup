@@ -1,7 +1,6 @@
 ---
 name: planner
 description: Creates simple, test-first implementation plans from verified context and requirements
-model: openai-codex/gpt-5.4
 tools: read, grep, find, ls
 inheritProjectContext: true
 inheritSkills: true

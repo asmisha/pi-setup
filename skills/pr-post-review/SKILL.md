@@ -100,7 +100,6 @@ Recommended drafting pattern:
 
 - agent: `worker`
 - skills: `writing-voice`
-- model: `openai-codex/gpt-5.3-codex-spark`
 - input: frozen finding manifest, verified diff mappings, requested submission mode, and any user tone constraints
 
 Then do a final factual pass yourself against the manifest and diff mappings.

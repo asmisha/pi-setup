@@ -1,7 +1,6 @@
 ---
 name: reviewer
 description: Exhaustive release-focused code review specialist for correctness, security, edge cases, performance, and maintainability
-model: openai-codex/gpt-5.4
 tools: read, grep, find, ls, bash
 inheritProjectContext: true
 inheritSkills: true

@@ -1,7 +1,6 @@
 ---
 name: simplicity-reviewer
 description: Specialized reviewer for over-engineering, abstraction bloat, unnecessary complexity, maintainability risks, and opportunities to simplify a change
-model: openai-codex/gpt-5.4
 tools: read, grep, find, ls, bash, write
 inheritProjectContext: true
 inheritSkills: true

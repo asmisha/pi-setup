@@ -2,7 +2,6 @@
 name: sentry-investigator
 description: Bounded Sentry issue/event investigation with strict stop conditions and concise evidence-first output
 tools: execute, read, bash
-model: openai-codex/gpt-5.4
 thinking: minimal
 output: false
 defaultProgress: true

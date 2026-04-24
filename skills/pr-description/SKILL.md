@@ -1,6 +1,6 @@
 ---
 name: pr-description
-description: Write or revise pull request titles and descriptions with a reason-first, technical-document style. Use when creating a PR body, rewriting a PR description, renaming a PR, or editing a draft PR. For draft PRs, load the writing-voice skill first and draft with Codex Spark instead of the default model.
+description: Write or revise pull request titles and descriptions with a reason-first, technical-document style. Use when creating a PR body, rewriting a PR description, renaming a PR, or editing a draft PR.
 ---
 
 # PR Title and Description
@@ -14,17 +14,16 @@ Use this skill when the user asks you to write, rewrite, or update a pull reques
 - Write like a short technical document: straightforward, complete, and easy to skim.
 - Keep the description concrete. Avoid filler, hype, and vague summaries.
 
-## Model and voice
+## Voice and drafting
 
 - For **draft PRs**, load the `writing-voice` skill first and follow it.
-- When drafting or rewriting PR title or description text, prefer a subagent pass with `model: openai-codex/gpt-5.3-codex-spark`, even if `openai-codex/gpt-5.4` is the default model.
-- Use the Codex Spark draft as the base text, then do a final factual pass yourself against the actual diff before publishing.
+- When drafting or rewriting PR title or description text, prefer a subagent drafting pass.
+- Use the subagent draft as the base text, then do a final factual pass yourself against the actual diff before publishing.
 
 Recommended subagent pattern:
 
 - Agent: `worker` or `delegate`
 - Skill: `writing-voice`
-- Model: `openai-codex/gpt-5.3-codex-spark`
 - Task: draft the PR title and/or body from the verified diff and tests, following the structure below
 
 ## Title guidelines
