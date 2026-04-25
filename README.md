@@ -17,11 +17,6 @@ Verified top-level contents:
 
 ## Extensions
 
-### `extensions/superset-lifecycle/`
-Sends lightweight lifecycle hooks for Pi activity to a local Superset listener. It detects Superset-related environment variables, emits `Start` and `Stop` events around agent activity, and skips subagent and `--no-session` runs.
-
-See `extensions/superset-lifecycle/README.md`.
-
 ### `extensions/worktree.ts`
 Adds worktree-aware Pi commands and path-sensitive built-in tool handling so a session can switch into another git worktree and keep using Pi against the new working directory.
 
@@ -38,7 +33,7 @@ The current durable task-tracking rewrite. It owns the event-sourced `task_track
 See `extensions/task-tracker/README.md`.
 
 ### `extensions/compaction/`
-A small compaction-only extension. It replaces Pi's generic compaction prompt with a repo-local structured advisory prompt and triggers compaction after context usage crosses 65%.
+A compaction extension that triggers compaction after context usage crosses 65%, auto-prefers an installed `pi-vcc` package, and supports session-scoped `local`, `pi-vcc`, and `pi-lcm` modes.
 
 See `extensions/compaction/README.md`.
 
@@ -83,7 +78,7 @@ If you use this repo's checked-in `.pi/settings.json`, the wiring is already in 
 
 1. Pi loads the repo `extensions/` directory.
 2. `extensions/task-tracker/index.ts` stays active for durable task state.
-3. `extensions/compaction/index.ts` stays active for the custom compaction prompt and the 65% threshold.
+3. `extensions/compaction/index.ts` stays active for the custom compaction routing/mode selection and the 65% threshold.
 
 If you want the same behavior in another local Pi setup, wire it one of these ways:
 
